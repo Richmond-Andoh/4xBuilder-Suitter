@@ -4,19 +4,25 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar'
 import { Input } from '@/components/ui/Input'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Send, Search, Plus, MoreVertical, ArrowLeft, Image as ImageIcon, Smile } from 'lucide-react'
+import { Send, Search, Plus, MoreVertical, ArrowLeft, Image as ImageIcon, AlertCircle } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { getConversations, getMessages, mockUsers, type Conversation, type Message, type User } from '@/lib/mockData'
 import { useAuth } from '@/context/AuthContext'
+import { useMessaging } from '@/hooks/use-messaging'
+import { EmojiPicker } from '@/components/EmojiPicker'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/hooks/useToast'
 
 export default function MessagesPage() {
   const { currentUser } = useAuth()
+  const { messagingClient, isReady, isLoading: isMessagingLoading } = useMessaging()
+  const { toast } = useToast()
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [messageInput, setMessageInput] = useState('')
   const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showNewMessage, setShowNewMessage] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
@@ -45,18 +51,73 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!messageInput.trim() || !currentUser) return
 
-    // If starting a new conversation
-    if (showNewMessage && selectedUser) {
-      // Create new conversation
-      const newConversation: Conversation = {
-        id: `conv-${Date.now()}`,
-        participants: [currentUser, selectedUser],
-        lastMessage: {
+    // Determine recipient
+    const recipient = showNewMessage && selectedUser 
+      ? selectedUser 
+      : selectedConversation?.participants.find(p => p.id !== currentUser.id)
+
+    if (!recipient) {
+      toast({
+        title: 'Error',
+        description: 'Please select a conversation or user first',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setSending(true)
+
+    try {
+      // Try to send via blockchain if ready
+      let sentViaBlockchain = false
+      if (isReady && messagingClient) {
+        try {
+          console.log('Attempting to send via blockchain to:', recipient.address)
+          // The actual messaging client API needs proper implementation
+          // For now, we'll just log and use local storage
+          // Uncomment and implement when you have the proper messaging setup:
+          // await messagingClient.executeSendMessageTransaction({
+          //   signer: currentAccount,
+          //   channelId: 'your-channel-id',
+          //   memberCapId: 'your-member-cap-id',
+          //   message: messageInput,
+          //   encryptedKey: 'your-encrypted-key',
+          // })
+          
+          console.log('Blockchain messaging not fully implemented yet, using local storage')
+          // sentViaBlockchain = true
+        } catch (error) {
+          console.error('Blockchain message failed:', error)
+        }
+      }
+
+      // Create and store message locally
+      if (showNewMessage && selectedUser) {
+        // Starting a new conversation
+        const newConversation: Conversation = {
+          id: `conv-${Date.now()}`,
+          participants: [currentUser, selectedUser],
+          lastMessage: {
+            id: `msg-${Date.now()}`,
+            conversationId: `conv-${Date.now()}`,
+            senderId: currentUser.id,
+            sender: currentUser,
+            recipientId: selectedUser.id,
+            content: messageInput,
+            images: [],
+            read: false,
+            createdAt: new Date(),
+          },
+          lastMessageTime: new Date(),
+          unreadCount: 0,
+        }
+
+        const newMessage: Message = {
           id: `msg-${Date.now()}`,
-          conversationId: `conv-${Date.now()}`,
+          conversationId: newConversation.id,
           senderId: currentUser.id,
           sender: currentUser,
           recipientId: selectedUser.id,
@@ -64,61 +125,60 @@ export default function MessagesPage() {
           images: [],
           read: false,
           createdAt: new Date(),
-        },
-        lastMessageTime: new Date(),
-        unreadCount: 0,
+        }
+
+        setConversations([newConversation, ...conversations])
+        setSelectedConversation(newConversation)
+        setMessages([newMessage])
+        setShowNewMessage(false)
+        setSelectedUser(null)
+      } else if (selectedConversation) {
+        // Existing conversation
+        const newMessage: Message = {
+          id: `msg-${Date.now()}`,
+          conversationId: selectedConversation.id,
+          senderId: currentUser.id,
+          sender: currentUser,
+          recipientId: recipient.id,
+          content: messageInput,
+          images: [],
+          read: false,
+          createdAt: new Date(),
+        }
+
+        setMessages([...messages, newMessage])
+        
+        // Update conversation's last message
+        setConversations(conversations.map(conv => 
+          conv.id === selectedConversation.id
+            ? {
+                ...conv,
+                lastMessage: newMessage,
+                lastMessageTime: new Date(),
+              }
+            : conv
+        ))
       }
 
-      const newMessage: Message = {
-        id: `msg-${Date.now()}`,
-        conversationId: newConversation.id,
-        senderId: currentUser.id,
-        sender: currentUser,
-        recipientId: selectedUser.id,
-        content: messageInput,
-        images: [],
-        read: false,
-        createdAt: new Date(),
-      }
-
-      setConversations([newConversation, ...conversations])
-      setSelectedConversation(newConversation)
-      setMessages([newMessage])
-      setShowNewMessage(false)
-      setSelectedUser(null)
       setMessageInput('')
-      return
+      
+      toast({
+        description: sentViaBlockchain ? 'Message sent via blockchain!' : 'Message sent!',
+      })
+    } catch (error) {
+      console.error('Failed to send message:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to send message. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setSending(false)
     }
+  }
 
-    // Existing conversation
-    if (!selectedConversation) return
-
-    const newMessage: Message = {
-      id: `msg-${Date.now()}`,
-      conversationId: selectedConversation.id,
-      senderId: currentUser.id,
-      sender: currentUser,
-      recipientId: selectedConversation.participants.find(p => p.id !== currentUser.id)?.id || '',
-      content: messageInput,
-      images: [],
-      read: false,
-      createdAt: new Date(),
-    }
-
-    setMessages([...messages, newMessage])
-    
-    // Update conversation's last message
-    setConversations(conversations.map(conv => 
-      conv.id === selectedConversation.id
-        ? {
-            ...conv,
-            lastMessage: newMessage,
-            lastMessageTime: new Date(),
-          }
-        : conv
-    ))
-
-    setMessageInput('')
+  const handleEmojiSelect = (emoji: string) => {
+    setMessageInput(prev => prev + emoji)
   }
 
   const handleStartNewMessage = (user: User) => {
@@ -176,14 +236,22 @@ export default function MessagesPage() {
         <div className="p-4 border-b border-border space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-xl font-bold">Messages</h2>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setShowNewMessage(!showNewMessage)}
-              className="hover:bg-muted"
-            >
-              <Plus className="w-5 h-5" />
-            </Button>
+            <div className="flex items-center gap-2">
+              {isMessagingLoading && (
+                <Skeleton className="w-5 h-5 rounded-full" />
+              )}
+              {!isMessagingLoading && !isReady && (
+                <AlertCircle className="w-5 h-5 text-yellow-500" title="Blockchain messaging unavailable" />
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowNewMessage(!showNewMessage)}
+                className="hover:bg-muted"
+              >
+                <Plus className="w-5 h-5" />
+              </Button>
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -439,21 +507,21 @@ export default function MessagesPage() {
                     className="pr-10 min-h-[44px]"
                     maxLength={1000}
                   />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 hover:bg-muted"
-                  >
-                    <Smile className="w-5 h-5 text-muted-foreground" />
-                  </Button>
+                  <div className="absolute right-1 top-1/2 -translate-y-1/2">
+                    <EmojiPicker onEmojiSelect={handleEmojiSelect} />
+                  </div>
                 </div>
                 <Button
                   onClick={handleSendMessage}
-                  disabled={!messageInput.trim()}
+                  disabled={!messageInput.trim() || sending}
                   size="icon"
                   className="flex-shrink-0"
                 >
-                  <Send className="w-4 h-4" />
+                  {sending ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  ) : (
+                    <Send className="w-4 h-4" />
+                  )}
                 </Button>
               </div>
               {messageInput.length > 0 && (

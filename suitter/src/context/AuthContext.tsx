@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { User, AuthState } from '@/lib/types'
-import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 
 interface AuthContextType {
   state: AuthState

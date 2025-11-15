@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import EmojiPicker, { EmojiClickData, Theme } from 'emoji-picker-react'
+import EmojiPickerReact, { EmojiClickData, Theme } from 'emoji-picker-react'
 import { Smile } from 'lucide-react'
 import { Button } from './ui/Button'
 import { Popover, PopoverContent, PopoverTrigger } from './ui/Popover'
@@ -36,7 +36,7 @@ export function EmojiPicker({ onEmojiSelect, className }: EmojiPickerComponentPr
         side="top"
         sideOffset={8}
       >
-        <EmojiPicker
+        <EmojiPickerReact
           onEmojiClick={handleEmojiClick}
           theme={Theme.AUTO}
           width="100%"
