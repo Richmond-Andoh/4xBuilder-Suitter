@@ -9,6 +9,7 @@ import { Post } from '@/lib/types'
 import { useToast } from '@/hooks/useToast'
 import { useSui } from '@/hooks/useSui'
 import { useAuth } from '@/context/AuthContext'
+import { getSuitIds, getAuthorSuitIds } from '@/lib/objectIndex'
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState('foryou')
@@ -50,14 +51,15 @@ export default function HomePage() {
 
   // Fetch posts from blockchain
   const loadPosts = useCallback(async (reset: boolean = false) => {
-    try {
-      if (reset) {
-        setLoading(true)
-        setOffset(0)
-        setHasMore(true)
-        setError(null)
-      }
+    // Always ensure loading is set properly
+    if (reset) {
+      setLoading(true)
+      setOffset(0)
+      setHasMore(true)
+      setError(null)
+    }
 
+    try {
       const currentOffset = reset ? 0 : offset
 
       if (activeTab === 'following') {
@@ -68,6 +70,7 @@ export default function HomePage() {
           setPosts([])
           setLoading(false)
           setHasMore(false)
+          setRefreshing(false)
           return
         }
 
@@ -77,7 +80,10 @@ export default function HomePage() {
         for (const userId of followedUserIds) {
           try {
             const userPosts = await getPostsByAuthor(userId, POSTS_PER_PAGE, currentOffset)
-            allPosts.push(...userPosts)
+            console.log(`Posts for user ${userId}:`, userPosts)
+            if (userPosts && userPosts.length > 0) {
+              allPosts.push(...userPosts)
+            }
           } catch (error) {
             console.error(`Error fetching posts for user ${userId}:`, error)
           }
@@ -99,10 +105,14 @@ export default function HomePage() {
         }
 
         setHasMore(uniquePosts.length === POSTS_PER_PAGE)
-        setOffset(currentOffset + 1)
+        if (!reset) {
+          setOffset(currentOffset + 1)
+        }
       } else {
         // Get all posts for "For You" feed
+        console.log('Loading posts for "For You" feed, offset:', currentOffset)
         const newPosts = await getPosts(POSTS_PER_PAGE, currentOffset)
+        console.log('Retrieved posts:', newPosts)
 
         if (reset) {
           setPosts(newPosts)
@@ -116,7 +126,9 @@ export default function HomePage() {
 
         // Check if there are more posts
         setHasMore(newPosts.length === POSTS_PER_PAGE)
-        setOffset(currentOffset + 1)
+        if (!reset) {
+          setOffset(currentOffset + 1)
+        }
       }
     } catch (error: any) {
       console.error('Error loading posts:', error)
@@ -130,15 +142,57 @@ export default function HomePage() {
         setPosts([])
       }
     } finally {
+      // Always ensure loading states are cleared
       setLoading(false)
       setRefreshing(false)
     }
   }, [activeTab, following, getPosts, getPostsByAuthor, toast, offset])
 
-  // Load posts on mount and when tab/following changes
+  // Track if component is mounted to prevent state updates after unmount
   useEffect(() => {
-    loadPosts(true) // Reset and reload when tab or following changes
-  }, [activeTab, following, loadPosts]) // Include loadPosts but it's stable due to useCallback
+    let isMounted = true
+    let cancelled = false
+
+    const loadInitialPosts = async () => {
+      if (cancelled) return
+
+      try {
+        setLoading(true)
+        console.log('[HomePage] Loading initial posts, tab:', activeTab)
+
+        // Debug: Check what's in localStorage
+        const allSuitIds = getSuitIds()
+        console.log('[HomePage] Total suit IDs in index:', allSuitIds.length)
+
+        if (activeTab === 'following' && following.size > 0) {
+          const followedIds = Array.from(following)
+          console.log('[HomePage] Following users:', followedIds)
+          followedIds.forEach(id => {
+            const authorIds = getAuthorSuitIds(id)
+            console.log(`[HomePage] Posts for user ${id}:`, authorIds.length)
+          })
+        }
+
+        await loadPosts(true)
+      } catch (error) {
+        if (isMounted && !cancelled) {
+          console.error('[HomePage] Error in loadInitialPosts:', error)
+          setError(error instanceof Error ? error.message : 'Failed to load posts')
+        }
+      } finally {
+        if (isMounted && !cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadInitialPosts()
+
+    return () => {
+      cancelled = true
+      isMounted = false
+    }
+  }, [activeTab, following]) // Only depend on tab and following to avoid loops
 
   // Separate effect to reload posts when modal closes (for new posts)
   useEffect(() => {
@@ -146,10 +200,10 @@ export default function HomePage() {
       // Small delay to ensure transaction is indexed
       const timer = setTimeout(() => {
         loadPosts(true)
-      }, 1000)
+      }, 1500) // Increased delay to ensure transaction is fully indexed
       return () => clearTimeout(timer)
     }
-  }, [showCreatePost, loadPosts])
+  }, [showCreatePost]) // Don't include loadPosts to avoid re-renders
 
   // Refresh posts
   const handleRefresh = async () => {

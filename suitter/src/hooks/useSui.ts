@@ -316,32 +316,51 @@ export function useSui() {
           {
             onSuccess: async (result) => {
               try {
+                console.log('[createPost] Transaction result:', result)
+                
                 // Try to extract object IDs from result directly
                 let objectIds = extractObjectIdsFromTransaction(result, 'Suit')
+                console.log('[createPost] Object IDs from result:', objectIds)
                 
                 // If not found, fetch full transaction details using digest
                 if (objectIds.length === 0 && result.digest) {
+                  console.log('[createPost] No object IDs in result, fetching transaction details...')
                   const client = getSuiClient()
                   const txDetails = await client.getTransactionBlock({
                     digest: result.digest,
                     options: {
                       showEffects: true,
                       showObjectChanges: true,
+                      showInput: true,
                     },
                   })
+                  console.log('[createPost] Transaction details:', txDetails)
                   objectIds = extractObjectIdsFromTransaction(txDetails, 'Suit')
+                  console.log('[createPost] Object IDs from transaction details:', objectIds)
                 }
                 
                 if (objectIds.length > 0 && state.address) {
+                  console.log(`[createPost] Adding suit ID ${objectIds[0]} for author ${state.address}`)
                   addSuitId(objectIds[0], state.address)
+                  
+                  // Verify it was added
+                  const verifyIds = getSuitIds()
+                  console.log(`[createPost] Verification - Total suit IDs in index: ${verifyIds.length}`)
+                  console.log(`[createPost] Verification - Index includes new ID: ${verifyIds.includes(objectIds[0])}`)
+                } else {
+                  console.warn('[createPost] Could not extract suit ID or author address missing', {
+                    objectIds,
+                    address: state.address
+                  })
                 }
               } catch (error) {
-                console.error('Error extracting object IDs:', error)
+                console.error('[createPost] Error extracting object IDs:', error)
               }
               
               resolve(result.digest)
             },
             onError: (error) => {
+              console.error('[createPost] Transaction error:', error)
               reject(error)
             },
           }
@@ -366,20 +385,31 @@ export function useSui() {
       
       // Get Suit IDs from index
       const suitIds = getSuitIds()
-      const paginatedIds = suitIds.slice(offset, offset + limit)
+      console.log(`[getPosts] Total suit IDs in index: ${suitIds.length}`)
+      
+      if (suitIds.length === 0) {
+        console.log('[getPosts] No suit IDs found in index')
+        return []
+      }
+
+      const paginatedIds = suitIds.slice(offset * limit, (offset * limit) + limit)
+      console.log(`[getPosts] Paginated IDs (offset ${offset}, limit ${limit}):`, paginatedIds)
       
       if (paginatedIds.length === 0) {
+        console.log('[getPosts] No IDs in paginated slice')
         return []
       }
 
       // Query suits by IDs
       const suits = await queryAllSuits(client, paginatedIds)
+      console.log(`[getPosts] Queried ${suits.length} suits from chain`)
       
       // Convert to Post objects
       const posts = await Promise.all(
         suits.map(suit => onChainSuitToPost(suit, client, state.address || undefined))
       )
       
+      console.log(`[getPosts] Converted to ${posts.length} posts`)
       return posts
     },
     [state.address]
@@ -405,20 +435,31 @@ export function useSui() {
       
       // Get Suit IDs for this author from index
       const authorSuitIds = getAuthorSuitIds(authorAddress)
-      const paginatedIds = authorSuitIds.slice(offset, offset + limit)
+      console.log(`[getPostsByAuthor] Author: ${authorAddress}, Total suit IDs: ${authorSuitIds.length}`)
+      
+      if (authorSuitIds.length === 0) {
+        console.log(`[getPostsByAuthor] No suit IDs found for author ${authorAddress}`)
+        return []
+      }
+
+      const paginatedIds = authorSuitIds.slice(offset * limit, (offset * limit) + limit)
+      console.log(`[getPostsByAuthor] Paginated IDs (offset ${offset}, limit ${limit}):`, paginatedIds)
       
       if (paginatedIds.length === 0) {
+        console.log(`[getPostsByAuthor] No IDs in paginated slice for author ${authorAddress}`)
         return []
       }
 
       // Query suits by IDs and filter by author
       const suits = await querySuitsByAuthor(client, authorAddress, paginatedIds)
+      console.log(`[getPostsByAuthor] Queried ${suits.length} suits from chain for author ${authorAddress}`)
       
       // Convert to Post objects
       const posts = await Promise.all(
         suits.map(suit => onChainSuitToPost(suit, client, state.address || undefined))
       )
       
+      console.log(`[getPostsByAuthor] Converted to ${posts.length} posts for author ${authorAddress}`)
       return posts
     },
     [state.address]
