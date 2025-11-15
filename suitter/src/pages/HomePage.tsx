@@ -1,20 +1,25 @@
-import { useState, useEffect } from 'react'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
+import { useState, useEffect, useCallback } from 'react'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/Tabs'
 import { PostCard } from '@/components/PostCard'
 import { CreatePostModal } from '@/components/CreatePostModal'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { Plus } from 'lucide-react'
-import { getPosts, type Post } from '@/lib/mockData'
+import { Plus, RefreshCw } from 'lucide-react'
+import { Post } from '@/lib/types'
 import { useToast } from '@/hooks/useToast'
+import { useSui } from '@/hooks/useSui'
+import { useAuth } from '@/context/AuthContext'
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState('foryou')
   const [showCreatePost, setShowCreatePost] = useState(false)
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [following, setFollowing] = useState<Set<string>>(new Set())
   const { toast } = useToast()
+  const { getPosts, getPostsByAuthor, likePost } = useSui()
+  const { state } = useAuth()
 
   // Load following state from localStorage on mount and when tab changes
   useEffect(() => {
@@ -27,7 +32,7 @@ export default function HomePage() {
         console.error('Failed to parse following state:', error)
       }
     }
-  }, [activeTab]) // Reload when tab changes to sync with other components
+  }, [activeTab])
 
   // Save following state to localStorage whenever it changes
   useEffect(() => {
@@ -38,22 +43,97 @@ export default function HomePage() {
     }
   }, [following])
 
-  useEffect(() => {
-    // Simulate loading
-    setLoading(true)
-    setTimeout(() => {
-      const followedUserIds = Array.from(following)
-      setPosts(getPosts(activeTab as 'foryou' | 'following', followedUserIds))
-      setLoading(false)
-    }, 500)
-  }, [activeTab, following])
+  // Fetch posts from blockchain
+  const loadPosts = useCallback(async () => {
+    try {
+      setLoading(true)
+      
+      if (activeTab === 'following') {
+        // Get posts from users being followed
+        const followedUserIds = Array.from(following)
+        
+        if (followedUserIds.length === 0) {
+          setPosts([])
+          setLoading(false)
+          return
+        }
 
-  const handleLike = (postId: string) => {
-    setPosts(posts.map(post => 
-      post.id === postId 
-        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
-        : post
-    ))
+        // Fetch posts from all followed users
+        const allPosts: Post[] = []
+        for (const userId of followedUserIds) {
+          try {
+            const userPosts = await getPostsByAuthor(userId, 20, 0)
+            allPosts.push(...userPosts)
+          } catch (error) {
+            console.error(`Error fetching posts for user ${userId}:`, error)
+          }
+        }
+
+        // Sort by creation date (newest first)
+        allPosts.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+        setPosts(allPosts)
+      } else {
+        // Get all posts for "For You" feed
+        const allPosts = await getPosts(20, 0)
+        setPosts(allPosts)
+      }
+    } catch (error) {
+      console.error('Error loading posts:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to load posts. Please try again.',
+        variant: 'destructive',
+      })
+      setPosts([])
+    } finally {
+      setLoading(false)
+    }
+  }, [activeTab, following, getPosts, getPostsByAuthor, toast])
+
+  // Load posts on mount and when tab/following changes
+  useEffect(() => {
+    loadPosts()
+  }, [loadPosts])
+
+  // Refresh posts
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    await loadPosts()
+    setRefreshing(false)
+    toast({
+      description: 'Posts refreshed',
+    })
+  }
+
+  const handleLike = async (postId: string) => {
+    try {
+      // Optimistically update UI
+      setPosts(posts.map(post => 
+        post.id === postId 
+          ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+          : post
+      ))
+
+      // Call blockchain
+      await likePost(postId)
+      
+      toast({
+        description: 'Post liked',
+      })
+    } catch (error) {
+      console.error('Error liking post:', error)
+      // Revert optimistic update
+      setPosts(posts.map(post => 
+        post.id === postId 
+          ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+          : post
+      ))
+      toast({
+        title: 'Error',
+        description: 'Failed to like post. Please try again.',
+        variant: 'destructive',
+      })
+    }
   }
 
   const handleReshare = (postId: string) => {
@@ -78,31 +158,40 @@ export default function HomePage() {
     })
   }
 
-  const handleCopyLink = (postId: string) => {
-    toast({
-      description: 'Link copied to clipboard',
-    })
+  const handleCopyLink = async (postId: string) => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/post/${postId}`)
+      toast({
+        description: 'Link copied to clipboard',
+      })
+    } catch (error) {
+      console.error('Failed to copy link:', error)
+      toast({
+        description: 'Failed to copy link',
+        variant: 'destructive',
+      })
+    }
   }
 
-  const handleShare = (postId: string) => {
+  const handleShare = () => {
     toast({
       description: 'Post shared',
     })
   }
 
-  const handleMute = (userId: string) => {
+  const handleMute = () => {
     toast({
       description: 'User muted',
     })
   }
 
-  const handleBlock = (userId: string) => {
+  const handleBlock = () => {
     toast({
       description: 'User blocked',
     })
   }
 
-  const handleReport = (postId: string) => {
+  const handleReport = () => {
     toast({
       description: 'Post reported',
     })
@@ -140,12 +229,24 @@ export default function HomePage() {
       {/* Feed Header */}
       <div className="sticky top-16 z-40 border-b border-border bg-background/95 backdrop-blur">
         <div className="px-6 py-4">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="w-full max-w-md">
-              <TabsTrigger value="foryou" className="flex-1">For You</TabsTrigger>
-              <TabsTrigger value="following" className="flex-1">Following</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex items-center justify-between mb-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="w-full max-w-md">
+                <TabsTrigger value="foryou" className="flex-1">For You</TabsTrigger>
+                <TabsTrigger value="following" className="flex-1">Following</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="ml-4"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+              Refresh
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -169,13 +270,18 @@ export default function HomePage() {
         <div className="divide-y divide-border">
           {posts.length === 0 ? (
             <div className="p-12 text-center">
-              <p className="text-muted-foreground">
+              <p className="text-muted-foreground mb-4">
                 {activeTab === 'following' 
                   ? following.size === 0
                     ? "You're not following anyone yet. Follow some users to see their posts here!"
                     : "No posts from people you're following yet."
                   : "No posts yet. Be the first to post!"}
               </p>
+              {!state.isConnected && (
+                <p className="text-sm text-muted-foreground">
+                  Connect your wallet to start posting and interacting with the community.
+                </p>
+              )}
             </div>
           ) : (
             posts.map((post) => (
@@ -204,12 +310,22 @@ export default function HomePage() {
           size="lg"
           className="rounded-full w-14 h-14 shadow-lg hover:shadow-xl transition-all hover:scale-105"
           onClick={() => setShowCreatePost(true)}
+          disabled={!state.isConnected}
         >
           <Plus className="w-6 h-6" />
         </Button>
       </div>
 
-      <CreatePostModal open={showCreatePost} onOpenChange={setShowCreatePost} />
+      <CreatePostModal 
+        open={showCreatePost} 
+        onOpenChange={(open) => {
+          setShowCreatePost(open)
+          if (!open) {
+            // Refresh posts when modal closes (in case a post was created)
+            loadPosts()
+          }
+        }} 
+      />
     </div>
   )
 }

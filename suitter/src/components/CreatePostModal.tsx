@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useSui } from '@/hooks/useSui'
+import { useToast } from '@/hooks/useToast'
 import {
   Dialog,
   DialogContent,
@@ -23,6 +24,7 @@ interface CreatePostModalProps {
 export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
   const { currentUser } = useAuth()
   const { createPost } = useSui()
+  const { toast } = useToast()
   const [content, setContent] = useState('')
   const [images, setImages] = useState<string[]>([])
   const [isPosting, setIsPosting] = useState(false)
@@ -36,13 +38,21 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
 
     setIsPosting(true)
     try {
-      await createPost(content, images)
+      const txDigest = await createPost(content, images)
+      toast({
+        title: 'Success',
+        description: 'Post created successfully!',
+      })
       setContent('')
       setImages([])
       onOpenChange(false)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to create post:', error)
-      // TODO: Show error toast
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to create post. Please try again.',
+        variant: 'destructive',
+      })
     } finally {
       setIsPosting(false)
     }

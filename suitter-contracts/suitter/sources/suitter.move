@@ -158,7 +158,6 @@ module suitter::suitter {
         &profile.image_url
     }
 
-    // Getter functions for accessing Like fields
     public fun get_like_suit_id(like: &Like): ID {
         like.suit_id
     }
