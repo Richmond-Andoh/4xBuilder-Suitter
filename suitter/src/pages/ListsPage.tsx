@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import {
   Dialog,
@@ -11,6 +12,7 @@ import {
 import { Input } from '@/components/ui/Input'
 import { Textarea } from '@/components/ui/Textarea'
 import { Plus, List, Users } from 'lucide-react'
+import { useToast } from '@/hooks/useToast'
 
 interface List {
   id: string
@@ -18,28 +20,55 @@ interface List {
   description: string
   memberCount: number
   createdAt: Date
+  members?: string[]
 }
 
 export default function ListsPage() {
+  const { toast } = useToast()
   const [lists, setLists] = useState<List[]>([
     {
       id: '1',
       name: 'Sui Developers',
       description: 'Amazing developers building on Sui',
-      memberCount: 42,
+      memberCount: 3,
       createdAt: new Date('2024-01-15'),
+      members: ['1', '2', '3'],
     },
     {
       id: '2',
       name: 'NFT Collectors',
       description: 'NFT enthusiasts and collectors',
-      memberCount: 128,
+      memberCount: 2,
       createdAt: new Date('2024-02-20'),
+      members: ['3', '4'],
     },
   ])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newListName, setNewListName] = useState('')
   const [newListDescription, setNewListDescription] = useState('')
+
+  // Load lists from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('suitter_lists')
+    if (stored) {
+      try {
+        const storedLists = JSON.parse(stored)
+        // Convert date strings back to Date objects
+        const parsedLists = storedLists.map((list: any) => ({
+          ...list,
+          createdAt: new Date(list.createdAt),
+        }))
+        setLists(parsedLists)
+      } catch (error) {
+        console.error('Failed to parse lists:', error)
+      }
+    }
+  }, [])
+
+  // Save lists to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('suitter_lists', JSON.stringify(lists))
+  }, [lists])
 
   const handleCreateList = () => {
     if (!newListName.trim()) return
@@ -50,12 +79,16 @@ export default function ListsPage() {
       description: newListDescription,
       memberCount: 0,
       createdAt: new Date(),
+      members: [],
     }
 
     setLists([...lists, newList])
     setNewListName('')
     setNewListDescription('')
     setShowCreateDialog(false)
+    toast({
+      description: 'List created successfully',
+    })
   }
 
   return (
@@ -85,9 +118,10 @@ export default function ListsPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {lists.map(list => (
-              <div
+              <Link
                 key={list.id}
-                className="rounded-2xl border border-border p-6 hover:bg-muted/50 transition-colors"
+                to={`/lists/${list.id}`}
+                className="rounded-2xl border border-border p-6 hover:bg-muted/50 transition-colors block"
               >
                 <div className="flex items-start justify-between mb-4">
                   <div>
@@ -99,7 +133,7 @@ export default function ListsPage() {
                   <Users className="w-4 h-4" />
                   <span>{list.memberCount} members</span>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}

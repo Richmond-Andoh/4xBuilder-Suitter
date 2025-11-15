@@ -67,9 +67,50 @@ export const mockUsers: User[] = [
     followersCount: 2340,
     followingCount: 789,
   },
+  {
+    id: '6',
+    address: '0xmaranatha1234567890abcdef1234567890abcdef',
+    username: 'maranatha',
+    displayName: 'Maranatha',
+    bio: 'NFT creator and Sui enthusiast. Building the future of digital art. 🎨',
+    avatar: '/placeholder-user.jpg',
+    banner: '/placeholder.jpg',
+    joinedAt: new Date('2024-01-10'),
+    followersCount: 1850,
+    followingCount: 420,
+    isVerified: true,
+  },
 ]
 
 export const mockPosts: Post[] = [
+  {
+    id: 'maranatha-nft-1',
+    authorId: '6',
+    author: mockUsers[5],
+    content: 'Just dropped my latest NFT collection on Sui! The first piece is now live. The details and colors are absolutely stunning. What do you think? 🎨✨',
+    images: ['/images/nft1.jpg'],
+    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+    likeCount: 456,
+    reshareCount: 128,
+    replyCount: 67,
+    liked: false,
+    reshared: false,
+    bookmarked: false,
+  },
+  {
+    id: 'maranatha-nft-2',
+    authorId: '6',
+    author: mockUsers[5],
+    content: 'Second piece from my collection is here! This one has a completely different vibe - more abstract and experimental. The Sui blockchain makes minting so smooth! 🚀',
+    images: ['/images/nft2.jpg'],
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000),
+    likeCount: 389,
+    reshareCount: 95,
+    replyCount: 52,
+    liked: false,
+    reshared: false,
+    bookmarked: false,
+  },
   {
     id: '1',
     authorId: '1',
@@ -254,8 +295,15 @@ export const mockNFTs: NFT[] = [
   },
 ]
 
-export function getPosts(feedType: 'foryou' | 'following' = 'foryou'): Post[] {
-  // In a real app, this would filter based on feed type
+export function getPosts(feedType: 'foryou' | 'following' = 'foryou', followedUserIds: string[] = []): Post[] {
+  if (feedType === 'following') {
+    // Filter posts to only show posts from users being followed
+    if (followedUserIds.length === 0) {
+      return [] // No posts if not following anyone
+    }
+    return mockPosts.filter(post => followedUserIds.includes(post.authorId))
+  }
+  // For "For You" feed, return all posts
   return mockPosts
 }
 
@@ -484,6 +532,34 @@ export const mockReplies: Post[] = [
 
 // Dummy media posts (posts with images)
 export const mockMediaPosts: Post[] = [
+  {
+    id: 'maranatha-nft-1',
+    authorId: '6',
+    author: mockUsers[5],
+    content: 'Just dropped my latest NFT collection on Sui! The first piece is now live. The details and colors are absolutely stunning. What do you think? 🎨✨',
+    images: ['/images/nft1.jpg'],
+    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000),
+    likeCount: 456,
+    reshareCount: 128,
+    replyCount: 67,
+    liked: false,
+    reshared: false,
+    bookmarked: false,
+  },
+  {
+    id: 'maranatha-nft-2',
+    authorId: '6',
+    author: mockUsers[5],
+    content: 'Second piece from my collection is here! This one has a completely different vibe - more abstract and experimental. The Sui blockchain makes minting so smooth! 🚀',
+    images: ['/images/nft2.jpg'],
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000),
+    likeCount: 389,
+    reshareCount: 95,
+    replyCount: 52,
+    liked: false,
+    reshared: false,
+    bookmarked: false,
+  },
   {
     id: 'media-1',
     authorId: '1',

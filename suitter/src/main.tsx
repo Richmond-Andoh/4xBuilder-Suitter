@@ -21,11 +21,7 @@ ReactDOM.createRoot(rootElement).render(
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-          <WalletProvider slushWallet={{
-				name: 'suiiter',
-			}}
-		>
-  
+          <WalletProvider autoConnect={false}>
             <BrowserRouter>
               <App />
             </BrowserRouter>
