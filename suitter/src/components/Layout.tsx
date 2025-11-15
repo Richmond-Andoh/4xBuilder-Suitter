@@ -1,7 +1,7 @@
 import { ReactNode, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
-import { WalletConnectButton } from './WalletConnectButton'
+import { ConnectButton } from '@mysten/dapp-kit'
 import { Button } from './ui/Button'
 import { Avatar, AvatarFallback, AvatarImage } from './ui/Avatar'
 import { CreatePostModal } from './CreatePostModal'
@@ -79,7 +79,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
 
           <div className="flex items-center justify-end gap-4 flex-1">
-            <WalletConnectButton />
+            <ConnectButton />
           </div>
         </div>
       </header>
