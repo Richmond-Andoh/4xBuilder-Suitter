@@ -2,6 +2,7 @@ import { useCallback, useState, useEffect } from 'react'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { useAuth } from '@/context/AuthContext'
+import { useSignAndExecuteTransaction, useCurrentWallet } from '@mysten/dapp-kit'
 import { User, Post, Reply } from '@/lib/types'
 import { SUITTER_PACKAGE_ID, SUITTER_MODULE } from '@/lib/constants'
 import {
@@ -112,6 +113,8 @@ async function onChainSuitToPost(
 export function useSui() {
   const { state } = useAuth()
   const [profileObjectId, setProfileObjectId] = useState<string | null>(null)
+  const { mutate: signAndExecuteTransaction } = useSignAndExecuteTransaction()
+  const { currentWallet } = useCurrentWallet()
 
   // Load profile object ID when address changes
   useEffect(() => {
@@ -151,42 +154,67 @@ export function useSui() {
       bio: string,
       imageUrl: string = ''
     ): Promise<string> => {
-      if (!state.address || !window.slushWallet) {
+      if (!state.address || !currentWallet) {
         throw new Error('Wallet not connected')
       }
 
-      const tx = new Transaction()
+      return new Promise((resolve, reject) => {
+        const tx = new Transaction()
 
-      // Convert strings to vector<u8> (bytes)
-      const usernameBytes = new TextEncoder().encode(username)
-      const bioBytes = new TextEncoder().encode(bio)
-      const imageUrlBytes = new TextEncoder().encode(imageUrl)
+        tx.moveCall({
+          target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::create_profile`,
+          arguments: [
+            tx.pure.string(username),
+            tx.pure.string(bio),
+            tx.pure.string(imageUrl),
+          ],
+        })
 
-      tx.moveCall({
-        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::create_profile`,
-        arguments: [
-          tx.pure.string(username),
-          tx.pure.string(bio),
-          tx.pure.string(imageUrl),
-        ],
+        signAndExecuteTransaction(
+          {
+            transaction: tx,
+          },
+          {
+            onSuccess: async (result) => {
+              try {
+                // Try to extract object IDs from result directly
+                let objectIds = extractObjectIdsFromTransaction(result, 'Profile')
+                
+                // If not found, fetch full transaction details using digest
+                if (objectIds.length === 0 && result.digest) {
+                  const client = getSuiClient()
+                  const txDetails = await client.getTransactionBlock({
+                    digest: result.digest,
+                    options: {
+                      showEffects: true,
+                      showObjectChanges: true,
+                    },
+                  })
+                  objectIds = extractObjectIdsFromTransaction(txDetails, 'Profile')
+                }
+                
+                if (objectIds.length > 0) {
+                  setProfileObjectId(objectIds[0])
+                } else {
+                  // Fallback: reload profile object ID
+                  await loadProfileObjectId(state.address!)
+                }
+              } catch (error) {
+                console.error('Error extracting profile object ID:', error)
+                // Fallback: reload profile object ID
+                await loadProfileObjectId(state.address!)
+              }
+
+              resolve(result.digest)
+            },
+            onError: (error) => {
+              reject(error)
+            },
+          }
+        )
       })
-
-      const result = await window.slushWallet.signAndExecuteTransaction({
-        transactionBlock: tx,
-      })
-
-      // Extract and store profile object ID
-      const objectIds = extractObjectIdsFromTransaction(result, 'Profile')
-      if (objectIds.length > 0) {
-        setProfileObjectId(objectIds[0])
-      } else {
-        // Fallback: reload profile object ID
-        await loadProfileObjectId(state.address)
-      }
-
-      return result.digest
     },
-    [state.address]
+    [state.address, currentWallet, signAndExecuteTransaction]
   )
 
   const updateProfile = useCallback(
@@ -196,7 +224,7 @@ export function useSui() {
       newBio?: string,
       newImageUrl?: string
     ): Promise<string> => {
-      if (!state.address || !window.slushWallet) {
+      if (!state.address || !currentWallet) {
         throw new Error('Wallet not connected')
       }
 
@@ -204,36 +232,48 @@ export function useSui() {
         throw new Error('Profile object ID is required')
       }
 
-      const tx = new Transaction()
+      return new Promise((resolve, reject) => {
+        const tx = new Transaction()
 
-      // Get the profile object
-      const profileArg = tx.object(profileObjectId)
+        // Get the profile object
+        const profileArg = tx.object(profileObjectId)
 
-      // Use current values if new values not provided
-      const client = getSuiClient()
-      const currentProfile = await queryProfileByOwner(client, state.address)
-      
-      const username = newUsername ?? currentProfile?.username ?? ''
-      const bio = newBio ?? currentProfile?.bio ?? ''
-      const imageUrl = newImageUrl ?? currentProfile?.image_url ?? ''
+        // Use current values if new values not provided
+        getSuiClient()
+          .then(client => queryProfileByOwner(client, state.address!))
+          .then(currentProfile => {
+            const username = newUsername ?? currentProfile?.username ?? ''
+            const bio = newBio ?? currentProfile?.bio ?? ''
+            const imageUrl = newImageUrl ?? currentProfile?.image_url ?? ''
 
-      tx.moveCall({
-        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::update_profile`,
-        arguments: [
-          profileArg,
-          tx.pure.string(username),
-          tx.pure.string(bio),
-          tx.pure.string(imageUrl),
-        ],
+            tx.moveCall({
+              target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::update_profile`,
+              arguments: [
+                profileArg,
+                tx.pure.string(username),
+                tx.pure.string(bio),
+                tx.pure.string(imageUrl),
+              ],
+            })
+
+            signAndExecuteTransaction(
+              {
+                transaction: tx,
+              },
+              {
+                onSuccess: (result) => {
+                  resolve(result.digest)
+                },
+                onError: (error) => {
+                  reject(error)
+                },
+              }
+            )
+          })
+          .catch(reject)
       })
-
-      const result = await window.slushWallet.signAndExecuteTransaction({
-        transactionBlock: tx,
-      })
-
-      return result.digest
     },
-    [state.address]
+    [state.address, currentWallet, signAndExecuteTransaction]
   )
 
   const getProfile = useCallback(
@@ -253,7 +293,7 @@ export function useSui() {
   // Post operations
   const createPost = useCallback(
     async (content: string, images: string[] = []): Promise<string> => {
-      if (!state.address || !window.slushWallet) {
+      if (!state.address || !currentWallet) {
         throw new Error('Wallet not connected')
       }
 
@@ -261,27 +301,54 @@ export function useSui() {
         throw new Error('Post content exceeds 280 characters')
       }
 
-      const tx = new Transaction()
+      return new Promise((resolve, reject) => {
+        const tx = new Transaction()
 
-      // Convert content to vector<u8> (bytes)
-      tx.moveCall({
-        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::post_suit`,
-        arguments: [tx.pure.string(content)],
+        tx.moveCall({
+          target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::post_suit`,
+          arguments: [tx.pure.string(content)],
+        })
+
+        signAndExecuteTransaction(
+          {
+            transaction: tx,
+          },
+          {
+            onSuccess: async (result) => {
+              try {
+                // Try to extract object IDs from result directly
+                let objectIds = extractObjectIdsFromTransaction(result, 'Suit')
+                
+                // If not found, fetch full transaction details using digest
+                if (objectIds.length === 0 && result.digest) {
+                  const client = getSuiClient()
+                  const txDetails = await client.getTransactionBlock({
+                    digest: result.digest,
+                    options: {
+                      showEffects: true,
+                      showObjectChanges: true,
+                    },
+                  })
+                  objectIds = extractObjectIdsFromTransaction(txDetails, 'Suit')
+                }
+                
+                if (objectIds.length > 0 && state.address) {
+                  addSuitId(objectIds[0], state.address)
+                }
+              } catch (error) {
+                console.error('Error extracting object IDs:', error)
+              }
+              
+              resolve(result.digest)
+            },
+            onError: (error) => {
+              reject(error)
+            },
+          }
+        )
       })
-
-      const result = await window.slushWallet.signAndExecuteTransaction({
-        transactionBlock: tx,
-      })
-
-      // Extract and index the created Suit object ID
-      const objectIds = extractObjectIdsFromTransaction(result, 'Suit')
-      if (objectIds.length > 0 && state.address) {
-        addSuitId(objectIds[0], state.address)
-      }
-
-      return result.digest
     },
-    [state.address]
+    [state.address, currentWallet, signAndExecuteTransaction]
   )
 
   const deletePost = useCallback(
@@ -360,31 +427,58 @@ export function useSui() {
   // Interaction operations
   const likePost = useCallback(
     async (suitId: string): Promise<string> => {
-      if (!state.address || !window.slushWallet) {
+      if (!state.address || !currentWallet) {
         throw new Error('Wallet not connected')
       }
 
-      const tx = new Transaction()
+      return new Promise((resolve, reject) => {
+        const tx = new Transaction()
 
-      // Convert suitId string to ID type
-      tx.moveCall({
-        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::add_like`,
-        arguments: [tx.pure.id(suitId)],
+        tx.moveCall({
+          target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::add_like`,
+          arguments: [tx.pure.id(suitId)],
+        })
+
+        signAndExecuteTransaction(
+          {
+            transaction: tx,
+          },
+          {
+            onSuccess: async (result) => {
+              try {
+                // Try to extract object IDs from result directly
+                let objectIds = extractObjectIdsFromTransaction(result, 'Like')
+                
+                // If not found, fetch full transaction details using digest
+                if (objectIds.length === 0 && result.digest) {
+                  const client = getSuiClient()
+                  const txDetails = await client.getTransactionBlock({
+                    digest: result.digest,
+                    options: {
+                      showEffects: true,
+                      showObjectChanges: true,
+                    },
+                  })
+                  objectIds = extractObjectIdsFromTransaction(txDetails, 'Like')
+                }
+                
+                if (objectIds.length > 0) {
+                  addLikeId(objectIds[0], suitId)
+                }
+              } catch (error) {
+                console.error('Error extracting like object ID:', error)
+              }
+              
+              resolve(result.digest)
+            },
+            onError: (error) => {
+              reject(error)
+            },
+          }
+        )
       })
-
-      const result = await window.slushWallet.signAndExecuteTransaction({
-        transactionBlock: tx,
-      })
-
-      // Extract and index the created Like object ID
-      const objectIds = extractObjectIdsFromTransaction(result, 'Like')
-      if (objectIds.length > 0) {
-        addLikeId(objectIds[0], suitId)
-      }
-
-      return result.digest
     },
-    [state.address]
+    [state.address, currentWallet, signAndExecuteTransaction]
   )
 
   const unlikePost = useCallback(
@@ -407,33 +501,61 @@ export function useSui() {
 
   const commentOnPost = useCallback(
     async (suitId: string, content: string, images: string[] = []): Promise<string> => {
-      if (!state.address || !window.slushWallet) {
+      if (!state.address || !currentWallet) {
         throw new Error('Wallet not connected')
       }
 
-      const tx = new Transaction()
+      return new Promise((resolve, reject) => {
+        const tx = new Transaction()
 
-      tx.moveCall({
-        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::add_comment`,
-        arguments: [
-          tx.pure.id(suitId),
-          tx.pure.string(content),
-        ],
+        tx.moveCall({
+          target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::add_comment`,
+          arguments: [
+            tx.pure.id(suitId),
+            tx.pure.string(content),
+          ],
+        })
+
+        signAndExecuteTransaction(
+          {
+            transaction: tx,
+          },
+          {
+            onSuccess: async (result) => {
+              try {
+                // Try to extract object IDs from result directly
+                let objectIds = extractObjectIdsFromTransaction(result, 'Comment')
+                
+                // If not found, fetch full transaction details using digest
+                if (objectIds.length === 0 && result.digest) {
+                  const client = getSuiClient()
+                  const txDetails = await client.getTransactionBlock({
+                    digest: result.digest,
+                    options: {
+                      showEffects: true,
+                      showObjectChanges: true,
+                    },
+                  })
+                  objectIds = extractObjectIdsFromTransaction(txDetails, 'Comment')
+                }
+                
+                if (objectIds.length > 0) {
+                  addCommentId(objectIds[0], suitId)
+                }
+              } catch (error) {
+                console.error('Error extracting comment object ID:', error)
+              }
+              
+              resolve(result.digest)
+            },
+            onError: (error) => {
+              reject(error)
+            },
+          }
+        )
       })
-
-      const result = await window.slushWallet.signAndExecuteTransaction({
-        transactionBlock: tx,
-      })
-
-      // Extract and index the created Comment object ID
-      const objectIds = extractObjectIdsFromTransaction(result, 'Comment')
-      if (objectIds.length > 0) {
-        addCommentId(objectIds[0], suitId)
-      }
-
-      return result.digest
     },
-    [state.address]
+    [state.address, currentWallet, signAndExecuteTransaction]
   )
 
   const getComments = useCallback(

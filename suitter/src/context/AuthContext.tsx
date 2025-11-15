@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react'
 import { User, AuthState } from '@/lib/types'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
+import { useCurrentWallet, useCurrentAccount } from '@mysten/dapp-kit'
 
 interface AuthContextType {
   state: AuthState
@@ -27,125 +28,106 @@ declare global {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  // Sync with dapp-kit wallet state
+  const { currentWallet, connectionStatus } = useCurrentWallet()
+  const account = useCurrentAccount()
+
   const [state, setState] = useState<AuthState>({
     isConnected: false,
     address: null,
     user: null,
   })
 
-  // Auto-reconnect on page load
+  // Sync AuthContext state with dapp-kit wallet state
+  useEffect(() => {
+    // Check if wallet is connected via account (more reliable)
+    const isWalletConnected = account !== null && connectionStatus === 'connected'
+    
+    if (isWalletConnected && account) {
+      const address = account.address
+      const label = account.label || account.address.slice(0, 6)
+      
+      // Only update if address has changed
+      setState((prevState) => {
+        if (prevState.address === address && prevState.isConnected) {
+          return prevState // No change needed
+        }
+        
+        // Create user object
+        const user: User = {
+          id: address.slice(0, 10),
+          address,
+          username: `${label}.sui`,
+          displayName: label,
+          bio: '',
+          avatar: '/placeholder-user.jpg',
+          banner: '/placeholder.jpg',
+          joinedAt: new Date(),
+          followersCount: 0,
+          followingCount: 0,
+        }
+
+        const newState: AuthState = {
+          isConnected: true,
+          address,
+          user,
+        }
+
+        localStorage.setItem('suitter_wallet', JSON.stringify(newState))
+        return newState
+      })
+    } else if (connectionStatus === 'disconnected' || (!account && connectionStatus !== 'connecting')) {
+      // Only clear state if wallet is explicitly disconnected
+      // Don't clear if it's still connecting
+      setState({
+        isConnected: false,
+        address: null,
+        user: null,
+      })
+    }
+  }, [account, connectionStatus])
+
+  // Load from localStorage on mount (fallback while dapp-kit initializes)
   useEffect(() => {
     const stored = localStorage.getItem('suitter_wallet')
-    if (stored) {
+    if (stored && (!currentWallet || connectionStatus !== 'connected')) {
       try {
-        const { address } = JSON.parse(stored)
-        
-        // Check if Slush wallet is available and still connected
-        if (typeof window !== 'undefined' && window.slushWallet) {
-          (async () => {
-            try {
-              const accounts = await window.slushWallet!.getAccounts()
-              if (accounts && accounts.includes(address)) {
-                // Verify connection and restore state
-                const account = await window.slushWallet!.getAccount()
-                const user: User = {
-                  id: address.slice(0, 10),
-                  address,
-                  username: 'Maranatha.sui',
-                  displayName: account?.name || 'Maranatha',
-                  bio: '',
-                  avatar: account?.avatar || '/placeholder-user.jpg',
-                  banner: '/placeholder.jpg',
-                  joinedAt: new Date(),
-                  followersCount: 0,
-                  followingCount: 0,
-                  email: 'maranathaokeleyodai@gmail.com',
-                }
-                setState({ isConnected: true, address, user })
-              } else {
-                localStorage.removeItem('suitter_wallet')
-              }
-            } catch (error) {
-              console.error('Failed to verify wallet connection:', error)
-              localStorage.removeItem('suitter_wallet')
-            }
-          })()
-        } else {
-          // Slush not available, clear stored data
-          localStorage.removeItem('suitter_wallet')
+        const storedState = JSON.parse(stored)
+        // Only restore if dapp-kit wallet is not connected yet
+        // This helps with initial page load before dapp-kit initializes
+        if (storedState.address && storedState.user && !state.isConnected) {
+          setState(storedState)
         }
       } catch (error) {
         console.error('Failed to parse stored wallet data:', error)
-        localStorage.removeItem('suitter_wallet')
+        // Don't remove localStorage here - let it be updated by the main useEffect
       }
     }
-  }, [])
+  }, []) // Only run once on mount
 
   const connectWallet = useCallback(async () => {
-    try {
-      // Check if Slush wallet is available
-      if (typeof window === 'undefined' || !window.slushWallet) {
-        throw new Error('Slush wallet not found. Please install the Slush extension.')
-      }
-
-      // Request connection - this should trigger the extension approval UI
-      const accounts = await window.slushWallet.connect()
-      
-      if (!accounts || accounts.length === 0) {
-        throw new Error('No accounts returned from wallet')
-      }
-
-      const address = accounts[0]
-      
-      // Get account info from Slush wallet
-      const account = await window.slushWallet.getAccount()
-      
-      // Create or get user profile
-      const user: User = {
-        id: address.slice(0, 10),
-        address,
-        username: 'Maranatha.sui',
-        displayName: account?.name || 'Maranatha',
-        bio: '',
-        avatar: account?.avatar || '/placeholder-user.jpg',
-        banner: '/placeholder.jpg',
-        joinedAt: new Date(),
-        followersCount: 0,
-        followingCount: 0,
-        email: 'maranathaokeleyodai@gmail.com',
-      }
-
-      // Check if profile exists on-chain, if not create it
-      // TODO: Check if profile exists, create if not
-      // This will be implemented in useSui hook
-      // For now, we'll skip the on-chain check to avoid circular dependency
-      
-      const newState = {
-        isConnected: true,
-        address,
-        user,
-      }
-      
-      setState(newState)
-      localStorage.setItem('suitter_wallet', JSON.stringify(newState))
-    } catch (error) {
-      console.error('Failed to connect wallet:', error)
-      throw error
+    // Wallet connection is now handled by @mysten/dapp-kit
+    // This function is kept for backwards compatibility but should redirect to wallet modal
+    // The actual connection happens via WalletModal which uses useConnectWallet
+    if (!currentWallet) {
+      throw new Error('Please use the Connect Wallet button in the header to connect your wallet')
     }
-  }, [])
+    // If wallet is already connected, do nothing
+    return
+  }, [currentWallet])
 
   const disconnectWallet = useCallback(async () => {
-    try {
-      if (window.slushWallet) {
-        await window.slushWallet.disconnect()
-      }
-    } catch (error) {
-      console.error('Error disconnecting wallet:', error)
+    // Wallet disconnection is handled by @mysten/dapp-kit
+    // The state will automatically update via the useEffect hook
+    // when currentWallet becomes null
+    if (currentWallet) {
+      // If you want to programmatically disconnect, use:
+      // currentWallet.disconnect()
+      // But usually the ConnectButton handles this
     }
-    
     setState({ isConnected: false, address: null, user: null })
     localStorage.removeItem('suitter_wallet')
-  }, [])
+  }, [currentWallet])
 
   return (
     <AuthContext.Provider

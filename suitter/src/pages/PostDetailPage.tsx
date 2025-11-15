@@ -9,6 +9,7 @@ import { ArrowLeft, Heart, MessageCircle, Send } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { getPostById, type Post, type Reply } from '@/lib/mockData'
 import { useAuth } from '@/context/AuthContext'
+import { useSui } from '@/hooks/useSui'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/useToast'
 import { EmojiPicker } from '@/components/EmojiPicker'
@@ -21,70 +22,155 @@ export default function PostDetailPage() {
   const [replyContent, setReplyContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [following, setFollowing] = useState<Set<string>>(new Set())
+  const [isCommenting, setIsCommenting] = useState(false)
   const { toast } = useToast()
+  const { getPostById: getOnChainPost, commentOnPost, getComments: getOnChainComments, likePost } = useSui()
 
   useEffect(() => {
-    if (id) {
-      setTimeout(() => {
-        const foundPost = getPostById(id)
-        setPost(foundPost || null)
-        // Mock replies
-        if (foundPost) {
-          setReplies([
-            {
-              id: '1',
-              postId: id,
-              authorId: '2',
-              author: {
-                id: '2',
-                address: '0xabcdef',
-                username: 'bob_dev',
-                displayName: 'Bob Developer',
-                bio: 'Developer',
-                avatar: '/placeholder-user.jpg',
-                banner: '/placeholder.jpg',
-                joinedAt: new Date(),
-                followersCount: 100,
-                followingCount: 50,
-              },
-              content: 'Great post! Really insightful.',
-              images: [],
-              createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
-              likeCount: 5,
-              liked: false,
-              replies: [],
-            },
-          ])
+    const loadPost = async () => {
+      if (!id) return
+      
+      setLoading(true)
+      try {
+        // Try to load from blockchain first
+        let foundPost: Post | null = null
+        try {
+          foundPost = await getOnChainPost(id)
+        } catch (error) {
+          console.error('Error loading post from blockchain:', error)
         }
+        
+        // Fallback to mock data
+        if (!foundPost) {
+          foundPost = getPostById(id) || null
+        }
+        
+        setPost(foundPost || null)
+        
+        // Load comments from blockchain
+        if (foundPost) {
+          try {
+            const onChainComments = await getOnChainComments(id)
+            if (onChainComments.length > 0) {
+              setReplies(onChainComments)
+            } else {
+              // Fallback to mock data if no comments found
+              setReplies([
+                {
+                  id: '1',
+                  postId: id,
+                  authorId: '2',
+                  author: {
+                    id: '2',
+                    address: '0xabcdef',
+                    username: 'bob_dev',
+                    displayName: 'Bob Developer',
+                    bio: 'Developer',
+                    avatar: '/placeholder-user.jpg',
+                    banner: '/placeholder.jpg',
+                    joinedAt: new Date(),
+                    followersCount: 100,
+                    followingCount: 50,
+                  },
+                  content: 'Great post! Really insightful.',
+                  images: [],
+                  createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000),
+                  likeCount: 5,
+                  liked: false,
+                  replies: [],
+                },
+              ])
+            }
+          } catch (error) {
+            console.error('Error loading comments:', error)
+            setReplies([])
+          }
+        }
+      } catch (error) {
+        console.error('Error loading post:', error)
+      } finally {
         setLoading(false)
-      }, 500)
+      }
     }
-  }, [id])
+    
+    loadPost()
+  }, [id, getOnChainPost, getOnChainComments])
 
-  const handleReply = () => {
+  const handleReply = async () => {
     if (!replyContent.trim() || !currentUser || !post) return
 
-    const newReply: Reply = {
-      id: Date.now().toString(),
-      postId: post.id,
-      authorId: currentUser.id,
-      author: currentUser,
-      content: replyContent,
-      images: [],
-      createdAt: new Date(),
-      likeCount: 0,
-      liked: false,
-      replies: [],
-    }
+    setIsCommenting(true)
+    try {
+      // Submit comment to blockchain
+      await commentOnPost(post.id, replyContent)
+      
+      // Optimistically add reply to UI
+      const newReply: Reply = {
+        id: Date.now().toString(),
+        postId: post.id,
+        authorId: currentUser.id,
+        author: currentUser,
+        content: replyContent,
+        images: [],
+        createdAt: new Date(),
+        likeCount: 0,
+        liked: false,
+        replies: [],
+      }
 
-    setReplies([newReply, ...replies])
-    setReplyContent('')
-    setPost({ ...post, replyCount: post.replyCount + 1 })
+      setReplies([newReply, ...replies])
+      setReplyContent('')
+      setPost({ ...post, replyCount: post.replyCount + 1 })
+      
+      toast({
+        description: 'Comment posted successfully!',
+      })
+      
+      // Reload comments to get the actual comment from blockchain
+      setTimeout(async () => {
+        try {
+          const updatedComments = await getOnChainComments(post.id)
+          if (updatedComments.length > 0) {
+            setReplies(updatedComments)
+          }
+        } catch (error) {
+          console.error('Error reloading comments:', error)
+        }
+      }, 1000)
+    } catch (error: any) {
+      console.error('Failed to post comment:', error)
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to post comment. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsCommenting(false)
+    }
   }
 
-  const handleLike = (postId: string) => {
-    if (post && post.id === postId) {
-      setPost({ ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 })
+  const handleLike = async (postId: string) => {
+    if (!post || post.id !== postId || !currentUser) return
+    
+    // Optimistically update UI
+    const wasLiked = post.liked
+    setPost({ ...post, liked: !wasLiked, likeCount: wasLiked ? post.likeCount - 1 : post.likeCount + 1 })
+    
+    try {
+      // Like post on blockchain
+      await likePost(postId)
+      toast({
+        description: 'Post liked',
+      })
+    } catch (error: any) {
+      // Revert optimistic update on error
+      setPost({ ...post, liked: wasLiked, likeCount: post.likeCount })
+      console.error('Error liking post:', error)
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to like post. Please try again.',
+        variant: 'destructive',
+      })
     }
   }
 
@@ -248,12 +334,21 @@ export default function PostDetailPage() {
               <div className="flex justify-end gap-2">
                 <Button
                   onClick={handleReply}
-                  disabled={!replyContent.trim()}
+                  disabled={!replyContent.trim() || isCommenting}
                   size="sm"
                   className="gap-2"
                 >
-                  <Send className="w-4 h-4" />
-                  Reply
+                  {isCommenting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      Posting...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      Reply
+                    </>
+                  )}
                 </Button>
               </div>
             </div>

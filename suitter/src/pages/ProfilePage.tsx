@@ -35,6 +35,7 @@ import {
 import { format } from 'date-fns'
 import { getUserById, getPosts, getRepliesByUserId, getMediaPostsByUserId, getLikedPostsByUserId, mockReplies, mockMediaPosts, mockLikedPosts, type User, type Post } from '@/lib/mockData'
 import { useAuth } from '@/context/AuthContext'
+import { useSui } from '@/hooks/useSui'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/useToast'
 
@@ -58,39 +59,66 @@ export default function ProfilePage() {
   const [editBanner, setEditBanner] = useState('')
   const [following, setFollowing] = useState<Set<string>>(new Set())
   const { toast } = useToast()
+  const { updateProfile, getProfile, profileObjectId, getPostsByAuthor } = useSui()
+  const [isUpdating, setIsUpdating] = useState(false)
   
   const isOwnProfile = !id || id === currentUser?.id
 
+  // Load profile from blockchain
   useEffect(() => {
-    setTimeout(() => {
-      let profileUser: User | null = null
+    const loadProfile = async () => {
+      setLoading(true)
       
-      if (id) {
-        // Viewing another user's profile by ID
-        profileUser = getUserById(id) || null
-      } else {
-        // Viewing own profile
-        if (currentUser) {
-          profileUser = currentUser
+      try {
+        let profileUser: User | null = null
+        
+        if (id) {
+          // Viewing another user's profile by ID
+          // Try to load from blockchain first, fallback to mock data
+          try {
+            const address = id.startsWith('0x') ? id : id // Assume id is address for now
+            profileUser = await getProfile(address)
+            if (!profileUser) {
+              profileUser = getUserById(id) || null
+            }
+          } catch (error) {
+            console.error('Error loading profile:', error)
+            profileUser = getUserById(id) || null
+          }
         } else {
-          // Not connected - show realistic dummy profile
-          profileUser = {
-            id: 'demo',
-            address: '0x1234567890abcdef1234567890abcdef12345678',
-            username: 'sui_builder',
-            displayName: 'Sui Builder',
-            bio: 'Blockchain developer passionate about Web3 and decentralized applications. Building the future on Sui. 🚀 Always learning, always building.',
-            avatar: '/placeholder-user.jpg',
-            banner: '/placeholder.jpg',
-            location: 'San Francisco, CA',
-            website: 'suibuilder.dev',
-            joinedAt: new Date('2023-11-15'),
-            followersCount: 2847,
-            followingCount: 523,
-            isVerified: true,
+          // Viewing own profile
+          if (currentUser) {
+            // Try to load from blockchain to get latest data
+            try {
+              if (currentUser.address) {
+                const onChainProfile = await getProfile(currentUser.address)
+                profileUser = onChainProfile || currentUser
+              } else {
+                profileUser = currentUser
+              }
+            } catch (error) {
+              console.error('Error loading own profile:', error)
+              profileUser = currentUser
+            }
+          } else {
+            // Not connected - show realistic dummy profile
+            profileUser = {
+              id: 'demo',
+              address: '0x1234567890abcdef1234567890abcdef12345678',
+              username: 'sui_builder',
+              displayName: 'Sui Builder',
+              bio: 'Blockchain developer passionate about Web3 and decentralized applications. Building the future on Sui. 🚀 Always learning, always building.',
+              avatar: '/placeholder-user.jpg',
+              banner: '/placeholder.jpg',
+              location: 'San Francisco, CA',
+              website: 'suibuilder.dev',
+              joinedAt: new Date('2023-11-15'),
+              followersCount: 2847,
+              followingCount: 523,
+              isVerified: true,
+            }
           }
         }
-      }
       
       if (profileUser) {
         setUser(profileUser)
@@ -101,8 +129,21 @@ export default function ProfilePage() {
         setEditAvatar(profileUser.avatar)
         setEditBanner(profileUser.banner)
         
-        // Get posts for this user, or use demo data if no posts found
-        const userPosts = getPosts().filter(p => p.authorId === profileUser!.id)
+        // Get posts for this user from blockchain
+        let userPosts: Post[] = []
+        try {
+          if (profileUser?.address) {
+            userPosts = await getPostsByAuthor(profileUser.address, 20, 0)
+          }
+        } catch (error) {
+          console.error('Error loading posts:', error)
+        }
+        
+        // Fallback to mock data if no posts found
+        if (userPosts.length === 0) {
+          userPosts = getPosts().filter(p => p.authorId === profileUser!.id)
+        }
+        
         const userReplies = getRepliesByUserId(profileUser.id)
         const userMedia = getMediaPostsByUserId(profileUser.id)
         const userLiked = getLikedPostsByUserId(profileUser.id)
@@ -153,10 +194,15 @@ export default function ProfilePage() {
         } else {
           setLikedPosts(userLiked)
         }
+      } catch (error) {
+        console.error('Error loading profile data:', error)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
-    }, 500)
-  }, [id, currentUser])
+    }
+    
+    loadProfile()
+  }, [id, currentUser, getProfile, getPostsByAuthor])
 
   const handleFollow = () => {
     setIsFollowing(!isFollowing)
@@ -302,10 +348,30 @@ export default function ProfilePage() {
     }
   }
 
-  const handleSaveProfile = () => {
-    if (user) {
+  const handleSaveProfile = async () => {
+    if (!user || !isOwnProfile || !currentUser || !profileObjectId) {
+      toast({
+        title: 'Error',
+        description: 'Cannot update profile. Please ensure you are logged in and have a profile.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    setIsUpdating(true)
+    try {
+      // Update profile on blockchain
+      await updateProfile(
+        profileObjectId,
+        editName, // username
+        editBio, // bio
+        editAvatar // image_url
+      )
+
+      // Update local state
       setUser({
         ...user,
+        username: editName.toLowerCase().replace(/\s+/g, '_'),
         displayName: editName,
         bio: editBio,
         location: editLocation || undefined,
@@ -313,13 +379,31 @@ export default function ProfilePage() {
         avatar: editAvatar,
         banner: editBanner,
       })
-      // Update current user in auth context if it's the current user's profile
-      if (isOwnProfile && currentUser) {
-        // This would normally update the on-chain profile via useSui hook
-        // For now, we just update local state
+
+      // Reload profile from blockchain to ensure we have latest data
+      if (currentUser.address) {
+        const updatedProfile = await getProfile(currentUser.address)
+        if (updatedProfile) {
+          setUser(updatedProfile)
+        }
       }
+
+      toast({
+        title: 'Success',
+        description: 'Profile updated successfully!',
+      })
+
+      setShowEditDialog(false)
+    } catch (error: any) {
+      console.error('Failed to update profile:', error)
+      toast({
+        title: 'Error',
+        description: error?.message || 'Failed to update profile. Please try again.',
+        variant: 'destructive',
+      })
+    } finally {
+      setIsUpdating(false)
     }
-    setShowEditDialog(false)
   }
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -881,8 +965,8 @@ export default function ProfilePage() {
             <Button variant="outline" onClick={() => setShowEditDialog(false)} className="font-semibold">
               Cancel
             </Button>
-            <Button onClick={handleSaveProfile} disabled={!editName.trim()} className="font-semibold min-w-[120px]">
-              Save Changes
+            <Button onClick={handleSaveProfile} disabled={!editName.trim() || isUpdating || !profileObjectId} className="font-semibold min-w-[120px]">
+              {isUpdating ? 'Saving...' : 'Save Changes'}
             </Button>
           </DialogFooter>
         </DialogContent>

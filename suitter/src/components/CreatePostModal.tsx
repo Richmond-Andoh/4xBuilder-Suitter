@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '@/context/AuthContext'
 import { useSui } from '@/hooks/useSui'
 import { useToast } from '@/hooks/useToast'
+import { useCurrentWallet, useCurrentAccount } from '@mysten/dapp-kit'
 import {
   Dialog,
   DialogContent,
@@ -22,23 +23,33 @@ interface CreatePostModalProps {
 }
 
 export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
-  const { currentUser } = useAuth()
+  const { currentUser, state } = useAuth()
   const { createPost } = useSui()
   const { toast } = useToast()
+  const { currentWallet, connectionStatus } = useCurrentWallet()
+  const account = useCurrentAccount()
   const [content, setContent] = useState('')
   const [images, setImages] = useState<string[]>([])
   const [isPosting, setIsPosting] = useState(false)
 
+  // Check wallet connection from both AuthContext and dapp-kit
+  // Prefer dapp-kit's account check as it's the source of truth
+  const isWalletConnected = !!account && connectionStatus === 'connected' && !!currentWallet
+
+  // Also check AuthContext state for UI display
+  const hasAuthState = state.isConnected && !!currentUser
+
   const charCount = content.length
   const isOverLimit = charCount > MAX_POST_CHARS
-  const canPost = content.trim().length > 0 && !isOverLimit && !isPosting
+  // Use dapp-kit account check as primary, AuthContext as secondary
+  const canPost = content.trim().length > 0 && !isOverLimit && !isPosting && isWalletConnected && (hasAuthState || !!account)
 
   const handlePost = async () => {
     if (!canPost || !currentUser) return
 
     setIsPosting(true)
     try {
-      const txDigest = await createPost(content, images)
+      await createPost(content, images)
       toast({
         title: 'Success',
         description: 'Post created successfully!',
@@ -79,9 +90,26 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
         <DialogHeader>
           <DialogTitle>Create Post</DialogTitle>
           <DialogDescription>
-            Share your thoughts with the community
+            {!isWalletConnected
+              ? 'Please connect your wallet to create a post'
+              : 'Share your thoughts with the community'}
           </DialogDescription>
         </DialogHeader>
+
+        {!isWalletConnected && (
+          <div className="mt-4 p-4 bg-muted rounded-lg text-center">
+            <p className="text-sm text-muted-foreground mb-2">
+              {connectionStatus === 'connecting'
+                ? 'Connecting wallet...'
+                : 'You need to connect your wallet to create posts'}
+            </p>
+            {connectionStatus === 'connecting' && (
+              <div className="flex items-center justify-center mt-2">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 space-y-4">
           <div className="flex gap-4">
@@ -121,12 +149,30 @@ export function CreatePostModal({ open, onOpenChange }: CreatePostModalProps) {
                   <Button
                     onClick={handlePost}
                     disabled={!canPost}
+                    title={
+                      !isWalletConnected
+                        ? 'Please connect your wallet to post'
+                        : isOverLimit
+                          ? 'Post exceeds character limit'
+                          : content.trim().length === 0
+                            ? 'Please enter some content'
+                            : ''
+                    }
                   >
                     {isPosting ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                         Posting...
                       </>
+                    ) : !isWalletConnected ? (
+                      connectionStatus === 'connecting' ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        'Connect Wallet'
+                      )
                     ) : (
                       'Post'
                     )}
