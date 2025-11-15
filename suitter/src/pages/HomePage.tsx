@@ -5,10 +5,12 @@ import { CreatePostModal } from '@/components/CreatePostModal'
 import { Button } from '@/components/ui/Button'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Plus } from 'lucide-react'
-import { getPosts, type Post } from '@/lib/mockData'
+import { getPosts, mockUsers, type Post } from '@/lib/mockData'
 import { useToast } from '@/hooks/useToast'
+import { useAuth } from '@/context/AuthContext'
 
 export default function HomePage() {
+  const { currentUser } = useAuth()
   const [activeTab, setActiveTab] = useState('foryou')
   const [showCreatePost, setShowCreatePost] = useState(false)
   const [posts, setPosts] = useState<Post[]>([])
@@ -43,10 +45,18 @@ export default function HomePage() {
     setLoading(true)
     setTimeout(() => {
       const followedUserIds = Array.from(following)
-      setPosts(getPosts(activeTab as 'foryou' | 'following', followedUserIds))
+      const fetchedPosts = getPosts(activeTab as 'foryou' | 'following', followedUserIds)
+      setPosts(fetchedPosts)
       setLoading(false)
     }, 500)
   }, [activeTab, following])
+
+  const handlePostCreated = () => {
+    // Refresh posts after creating a new one
+    const followedUserIds = Array.from(following)
+    const fetchedPosts = getPosts(activeTab as 'foryou' | 'following', followedUserIds)
+    setPosts(fetchedPosts)
+  }
 
   const handleLike = (postId: string) => {
     setPosts(posts.map(post => 
@@ -140,63 +150,108 @@ export default function HomePage() {
       {/* Feed Header */}
       <div className="sticky top-16 z-40 border-b border-border bg-background/95 backdrop-blur">
         <div className="px-6 py-4">
-          <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList className="w-full max-w-md">
               <TabsTrigger value="foryou" className="flex-1">For You</TabsTrigger>
               <TabsTrigger value="following" className="flex-1">Following</TabsTrigger>
             </TabsList>
+
+            {/* For You Tab Content */}
+            <TabsContent value="foryou" className="mt-0">
+              {loading ? (
+                <div className="divide-y divide-border">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="p-6 space-y-4">
+                      <div className="flex gap-4">
+                        <Skeleton className="w-12 h-12 rounded-full" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-4 w-24" />
+                          <Skeleton className="h-20 w-full" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {posts.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <p className="text-muted-foreground">No posts yet. Be the first to post!</p>
+                    </div>
+                  ) : (
+                    posts.map((post) => (
+                      <PostCard
+                        key={post.id}
+                        post={post}
+                        onLike={handleLike}
+                        onReshare={handleReshare}
+                        onBookmark={handleBookmark}
+                        onCopyLink={handleCopyLink}
+                        onShare={handleShare}
+                        onMute={handleMute}
+                        onBlock={handleBlock}
+                        onReport={handleReport}
+                        onDelete={handleDelete}
+                        onFollow={handleFollow}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Following Tab Content */}
+            <TabsContent value="following" className="mt-0">
+              {loading ? (
+                <div className="divide-y divide-border">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} className="p-6 space-y-4">
+                      <div className="flex gap-4">
+                        <Skeleton className="w-12 h-12 rounded-full" />
+                        <div className="flex-1 space-y-2">
+                          <Skeleton className="h-4 w-32" />
+                          <Skeleton className="h-4 w-24" />
+                          <Skeleton className="h-20 w-full" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {posts.length === 0 ? (
+                    <div className="p-12 text-center">
+                      <p className="text-muted-foreground">
+                        {following.size === 0
+                          ? "You're not following anyone yet. Follow some users to see their posts here!"
+                          : "No posts from people you're following yet."}
+                      </p>
+                    </div>
+                  ) : (
+                    posts.map((post) => (
+                      <PostCard
+                        key={post.id}
+                        post={post}
+                        onLike={handleLike}
+                        onReshare={handleReshare}
+                        onBookmark={handleBookmark}
+                        onCopyLink={handleCopyLink}
+                        onShare={handleShare}
+                        onMute={handleMute}
+                        onBlock={handleBlock}
+                        onReport={handleReport}
+                        onDelete={handleDelete}
+                        onFollow={handleFollow}
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+            </TabsContent>
           </Tabs>
         </div>
       </div>
-
-      {/* Feed Content */}
-      {loading ? (
-        <div className="divide-y divide-border">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="p-6 space-y-4">
-              <div className="flex gap-4">
-                <Skeleton className="w-12 h-12 rounded-full" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-32" />
-                  <Skeleton className="h-4 w-24" />
-                  <Skeleton className="h-20 w-full" />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="divide-y divide-border">
-          {posts.length === 0 ? (
-            <div className="p-12 text-center">
-              <p className="text-muted-foreground">
-                {activeTab === 'following' 
-                  ? following.size === 0
-                    ? "You're not following anyone yet. Follow some users to see their posts here!"
-                    : "No posts from people you're following yet."
-                  : "No posts yet. Be the first to post!"}
-              </p>
-            </div>
-          ) : (
-            posts.map((post) => (
-              <PostCard
-                key={post.id}
-                post={post}
-                onLike={handleLike}
-                onReshare={handleReshare}
-                onBookmark={handleBookmark}
-                onCopyLink={handleCopyLink}
-                onShare={handleShare}
-                onMute={handleMute}
-                onBlock={handleBlock}
-                onReport={handleReport}
-                onDelete={handleDelete}
-                onFollow={handleFollow}
-              />
-            ))
-          )}
-        </div>
-      )}
 
       {/* Floating Create Post Button - Fixed position, doesn't scroll */}
       <div className="fixed bottom-6 right-6 z-50">
@@ -209,7 +264,11 @@ export default function HomePage() {
         </Button>
       </div>
 
-      <CreatePostModal open={showCreatePost} onOpenChange={setShowCreatePost} />
+      <CreatePostModal 
+        open={showCreatePost} 
+        onOpenChange={setShowCreatePost}
+        onPostCreated={handlePostCreated}
+      />
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Avatar, AvatarFallback, AvatarImage } from './ui/Avatar'
 import { Button } from './ui/Button'
@@ -14,6 +15,7 @@ import { Post } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { motion } from 'framer-motion'
 import { useAuth } from '@/context/AuthContext'
+import { CommentModal } from './CommentModal'
 
 interface PostCardProps {
   post: Post
@@ -44,6 +46,7 @@ export function PostCard({
 }: PostCardProps) {
   const { currentUser } = useAuth()
   const navigate = useNavigate()
+  const [showCommentModal, setShowCommentModal] = useState(false)
   const isOwnPost = currentUser?.id === post.author.id
   
   const initials = post.author.displayName
@@ -205,7 +208,11 @@ export function PostCard({
               onClick={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
-                navigate(`/post/${post.id}`)
+                if (currentUser) {
+                  setShowCommentModal(true)
+                } else {
+                  navigate(`/post/${post.id}`)
+                }
               }}
             >
               <MessageCircle className="w-4 h-4" />
@@ -269,6 +276,15 @@ export function PostCard({
           </div>
         </div>
       </div>
+
+      <CommentModal
+        open={showCommentModal}
+        onOpenChange={setShowCommentModal}
+        post={post}
+        onCommentAdded={() => {
+          // Optionally refresh post data or update reply count
+        }}
+      />
     </motion.article>
   )
 }

@@ -1,6 +1,5 @@
 import { useState, useRef } from 'react'
 import { useAuth } from '@/context/AuthContext'
-import { useSui } from '@/hooks/useSui'
 import {
   Dialog,
   DialogContent,
@@ -11,21 +10,31 @@ import {
 import { Textarea } from './ui/Textarea'
 import { Button } from './ui/Button'
 import { Avatar, AvatarFallback, AvatarImage } from './ui/Avatar'
-import { Loader2, Image as ImageIcon, X, Link as LinkIcon } from 'lucide-react'
+import { Loader2, Image as ImageIcon, X, Send } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { MAX_POST_CHARS } from '@/lib/constants'
 import { EmojiPicker } from './EmojiPicker'
 import { useToast } from '@/hooks/useToast'
+import { Post } from '@/lib/types'
 
-interface CreatePostModalProps {
+interface CommentModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onPostCreated?: () => void
+  post: Post
+  onCommentAdded?: () => void
+  isReply?: boolean
+  parentReplyId?: string
 }
 
-export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePostModalProps) {
+export function CommentModal({ 
+  open, 
+  onOpenChange, 
+  post, 
+  onCommentAdded,
+  isReply = false,
+  parentReplyId 
+}: CommentModalProps) {
   const { currentUser } = useAuth()
-  const { createPost } = useSui()
   const { toast } = useToast()
   const [content, setContent] = useState('')
   const [images, setImages] = useState<string[]>([])
@@ -36,10 +45,6 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
   const charCount = content.length
   const isOverLimit = charCount > MAX_POST_CHARS
   const canPost = content.trim().length > 0 && !isOverLimit && !isPosting
-
-  // Extract URLs from content
-  const urlRegex = /(https?:\/\/[^\s]+)/g
-  const urls = content.match(urlRegex) || []
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
@@ -63,32 +68,31 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
     setImages(prev => prev.filter((_, i) => i !== index))
   }
 
-  const handlePost = async () => {
+  const handleComment = async () => {
     if (!canPost || !currentUser) return
 
     setIsPosting(true)
     try {
-      // For now, we'll create a mock post locally since the blockchain integration is not fully implemented
-      // In production, this would call createPost which interacts with the Sui blockchain
-      await createPost(content, images)
+      // TODO: Integrate with blockchain to create comment/reply
+      // For now, this is a mock implementation
       
       toast({
-        description: 'Post created successfully!',
+        description: isReply ? 'Reply posted successfully!' : 'Comment posted successfully!',
       })
       
       setContent('')
       setImages([])
       onOpenChange(false)
       
-      // Notify parent component to refresh posts
-      if (onPostCreated) {
-        onPostCreated()
+      // Notify parent component to refresh comments
+      if (onCommentAdded) {
+        onCommentAdded()
       }
     } catch (error) {
-      console.error('Failed to create post:', error)
+      console.error('Failed to post comment:', error)
       toast({
         title: 'Error',
-        description: 'Failed to create post. Please try again.',
+        description: 'Failed to post comment. Please try again.',
       })
     } finally {
       setIsPosting(false)
@@ -114,9 +118,9 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-2xl overflow-visible">
         <DialogHeader>
-          <DialogTitle>Create Post</DialogTitle>
+          <DialogTitle>{isReply ? 'Reply' : 'Add Comment'}</DialogTitle>
           <DialogDescription>
-            Share your thoughts with the community
+            {isReply ? 'Post your reply' : 'Share your thoughts on this post'}
           </DialogDescription>
         </DialogHeader>
 
@@ -130,7 +134,7 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
             <div className="flex-1 space-y-4">
               <div className="relative">
                 <Textarea
-                  placeholder="What's happening?"
+                  placeholder={isReply ? "Post your reply..." : "Add a comment..."}
                   value={content}
                   onChange={(e) => setContent(e.target.value)}
                   className="min-h-[120px] resize-none pr-10"
@@ -144,25 +148,6 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
                   />
                 </div>
               </div>
-
-              {/* Link Preview */}
-              {urls.length > 0 && (
-                <div className="space-y-2">
-                  {urls.map((url, index) => (
-                    <div key={index} className="flex items-center gap-2 p-2 bg-muted rounded-lg">
-                      <LinkIcon className="w-4 h-4 text-muted-foreground" />
-                      <a
-                        href={url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-primary hover:underline truncate flex-1"
-                      >
-                        {url}
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              )}
 
               {/* Image Preview */}
               {images.length > 0 && (
@@ -202,7 +187,6 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
                     className="hidden"
                     onChange={handleImageUpload}
                     disabled={images.length >= MAX_IMAGES || isPosting}
-                    aria-label="Upload images"
                   />
                   <Button
                     type="button"
@@ -221,7 +205,7 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
                   )}
                 </div>
 
-                {/* Character Counter and Post Button */}
+                {/* Character Counter and Send Button */}
                 <div className="flex items-center gap-4">
                   <div className="text-sm text-muted-foreground">
                     <span className={cn(
@@ -241,16 +225,20 @@ export function CreatePostModal({ open, onOpenChange, onPostCreated }: CreatePos
                       Cancel
                     </Button>
                     <Button
-                      onClick={handlePost}
+                      onClick={handleComment}
                       disabled={!canPost}
+                      className="gap-2"
                     >
                       {isPosting ? (
                         <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                          Posting...
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          {isReply ? 'Replying...' : 'Posting...'}
                         </>
                       ) : (
-                        'Post'
+                        <>
+                          <Send className="w-4 h-4" />
+                          {isReply ? 'Reply' : 'Comment'}
+                        </>
                       )}
                     </Button>
                   </div>

@@ -1,13 +1,14 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { PostCard } from '@/components/PostCard'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { ArrowLeft, Heart, MessageCircle, Send } from 'lucide-react'
+import { ArrowLeft, Heart, MessageCircle, Send, Image as ImageIcon, X } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import { getPostById, type Post, type Reply } from '@/lib/mockData'
+import { getPostById } from '@/lib/mockData'
+import { type Post, type Reply } from '@/lib/types'
 import { useAuth } from '@/context/AuthContext'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/useToast'
@@ -19,8 +20,11 @@ export default function PostDetailPage() {
   const [post, setPost] = useState<Post | null>(null)
   const [replies, setReplies] = useState<Reply[]>([])
   const [replyContent, setReplyContent] = useState('')
+  const [replyImages, setReplyImages] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [following, setFollowing] = useState<Set<string>>(new Set())
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const MAX_IMAGES = 4
   const { toast } = useToast()
 
   useEffect(() => {
@@ -61,6 +65,28 @@ export default function PostDetailPage() {
     }
   }, [id])
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+
+    const remainingSlots = MAX_IMAGES - replyImages.length
+
+    Array.from(files).slice(0, remainingSlots).forEach((file) => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onloadend = () => {
+          const result = reader.result as string
+          setReplyImages(prev => [...prev, result])
+        }
+        reader.readAsDataURL(file)
+      }
+    })
+  }
+
+  const removeImage = (index: number) => {
+    setReplyImages(prev => prev.filter((_, i) => i !== index))
+  }
+
   const handleReply = () => {
     if (!replyContent.trim() || !currentUser || !post) return
 
@@ -70,7 +96,7 @@ export default function PostDetailPage() {
       authorId: currentUser.id,
       author: currentUser,
       content: replyContent,
-      images: [],
+      images: replyImages,
       createdAt: new Date(),
       likeCount: 0,
       liked: false,
@@ -79,6 +105,7 @@ export default function PostDetailPage() {
 
     setReplies([newReply, ...replies])
     setReplyContent('')
+    setReplyImages([])
     setPost({ ...post, replyCount: post.replyCount + 1 })
   }
 
@@ -114,25 +141,25 @@ export default function PostDetailPage() {
     })
   }
 
-  const handleShare = (postId: string) => {
+  const handleShare = (_postId: string) => {
     toast({
       description: 'Post shared',
     })
   }
 
-  const handleMute = (userId: string) => {
+  const handleMute = (_userId: string) => {
     toast({
       description: 'User muted',
     })
   }
 
-  const handleBlock = (userId: string) => {
+  const handleBlock = (_userId: string) => {
     toast({
       description: 'User blocked',
     })
   }
 
-  const handleReport = (postId: string) => {
+  const handleReport = (_postId: string) => {
     toast({
       description: 'Post reported',
     })
@@ -245,7 +272,62 @@ export default function PostDetailPage() {
                   />
                 </div>
               </div>
-              <div className="flex justify-end gap-2">
+
+              {/* Image Preview */}
+              {replyImages.length > 0 && (
+                <div className={cn(
+                  "grid gap-2",
+                  replyImages.length === 1 ? "grid-cols-1" : "grid-cols-2"
+                )}>
+                  {replyImages.map((image, index) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={image}
+                        alt={`Upload ${index + 1}`}
+                        className="w-full h-48 object-cover rounded-lg border border-border"
+                      />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => removeImage(index)}
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={handleImageUpload}
+                    disabled={replyImages.length >= MAX_IMAGES}
+                    aria-label="Upload images"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={replyImages.length >= MAX_IMAGES}
+                    className="hover:bg-muted"
+                  >
+                    <ImageIcon className="w-5 h-5 text-muted-foreground" />
+                  </Button>
+                  {replyImages.length >= MAX_IMAGES && (
+                    <span className="text-xs text-muted-foreground">
+                      Max {MAX_IMAGES} images
+                    </span>
+                  )}
+                </div>
                 <Button
                   onClick={handleReply}
                   disabled={!replyContent.trim()}
@@ -291,6 +373,22 @@ export default function PostDetailPage() {
                     </span>
                   </div>
                   <p className="text-sm mb-3">{reply.content}</p>
+                  {/* Reply Images */}
+                  {reply.images && reply.images.length > 0 && (
+                    <div className={cn(
+                      'mt-3 rounded-2xl overflow-hidden border border-border',
+                      reply.images.length === 1 ? 'w-full' : 'grid grid-cols-2 gap-2'
+                    )}>
+                      {reply.images.map((image: string, idx: number) => (
+                        <img
+                          key={idx}
+                          src={image}
+                          alt={`Reply image ${idx + 1}`}
+                          className="w-full h-auto bg-muted object-cover max-h-[400px]"
+                        />
+                      ))}
+                    </div>
+                  )}
                   <div className="flex items-center gap-4 text-muted-foreground">
                     <Button variant="ghost" size="sm" className="h-8">
                       <Heart className={cn('w-4 h-4', reply.liked && 'fill-current')} />

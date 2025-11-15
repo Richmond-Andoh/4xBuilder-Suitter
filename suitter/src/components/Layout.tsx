@@ -5,6 +5,7 @@ import { ConnectButton } from '@mysten/dapp-kit'
 import { Button } from './ui/Button'
 import { Avatar, AvatarFallback, AvatarImage } from './ui/Avatar'
 import { CreatePostModal } from './CreatePostModal'
+import { PeopleToFollowModal } from './PeopleToFollowModal'
 import { MobileNav } from './MobileNav'
 import { Home, Compass, Bell, ImageIcon, Bookmark, List, User, Settings, Plus, Flame, Hash, ArrowUpRight, UserPlus, Users, Check, MessageCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,7 @@ export default function Layout({ children }: LayoutProps) {
   const { state } = useAuth()
   const { toast } = useToast()
   const [showCreatePost, setShowCreatePost] = useState(false)
+  const [showPeopleModal, setShowPeopleModal] = useState(false)
   const [following, setFollowing] = useState<Set<string>>(new Set())
   
   // Load following state from localStorage on mount
@@ -149,6 +151,24 @@ export default function Layout({ children }: LayoutProps) {
         </aside>
 
         <CreatePostModal open={showCreatePost} onOpenChange={setShowCreatePost} />
+        <PeopleToFollowModal 
+          open={showPeopleModal} 
+          onOpenChange={(open) => {
+            setShowPeopleModal(open)
+            // Refresh following state when modal closes
+            if (!open) {
+              const stored = localStorage.getItem('suitter_following')
+              if (stored) {
+                try {
+                  const followingArray = JSON.parse(stored)
+                  setFollowing(new Set(followingArray))
+                } catch (error) {
+                  console.error('Failed to parse following state:', error)
+                }
+              }
+            }
+          }} 
+        />
 
         {/* Main Content - Single Column, Max 600px, Centered */}
         <main className={cn(
@@ -302,12 +322,12 @@ export default function Layout({ children }: LayoutProps) {
                   )
                 })}
               </div>
-              <Link
-                to="/explore"
-                className="mt-4 block text-center text-sm font-semibold text-primary hover:underline"
+              <button
+                onClick={() => setShowPeopleModal(true)}
+                className="mt-4 w-full text-center text-sm font-semibold text-primary hover:underline"
               >
                 Show more
-              </Link>
+              </button>
             </div>
           </div>
         </aside>
