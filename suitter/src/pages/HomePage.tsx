@@ -13,16 +13,40 @@ export default function HomePage() {
   const [showCreatePost, setShowCreatePost] = useState(false)
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [following, setFollowing] = useState<Set<string>>(new Set())
   const { toast } = useToast()
+
+  // Load following state from localStorage on mount and when tab changes
+  useEffect(() => {
+    const stored = localStorage.getItem('suitter_following')
+    if (stored) {
+      try {
+        const followingArray = JSON.parse(stored)
+        setFollowing(new Set(followingArray))
+      } catch (error) {
+        console.error('Failed to parse following state:', error)
+      }
+    }
+  }, [activeTab]) // Reload when tab changes to sync with other components
+
+  // Save following state to localStorage whenever it changes
+  useEffect(() => {
+    if (following.size > 0) {
+      localStorage.setItem('suitter_following', JSON.stringify(Array.from(following)))
+    } else {
+      localStorage.removeItem('suitter_following')
+    }
+  }, [following])
 
   useEffect(() => {
     // Simulate loading
     setLoading(true)
     setTimeout(() => {
-      setPosts(getPosts(activeTab as 'foryou' | 'following'))
+      const followedUserIds = Array.from(following)
+      setPosts(getPosts(activeTab as 'foryou' | 'following', followedUserIds))
       setLoading(false)
     }, 500)
-  }, [activeTab])
+  }, [activeTab, following])
 
   const handleLike = (postId: string) => {
     setPosts(posts.map(post => 
@@ -92,9 +116,23 @@ export default function HomePage() {
   }
 
   const handleFollow = (userId: string) => {
-    toast({
-      description: 'User followed',
-    })
+    const isFollowingUser = following.has(userId)
+    
+    if (isFollowingUser) {
+      setFollowing(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(userId)
+        return newSet
+      })
+      toast({
+        description: 'User unfollowed',
+      })
+    } else {
+      setFollowing(prev => new Set(prev).add(userId))
+      toast({
+        description: 'User followed',
+      })
+    }
   }
 
   return (
@@ -131,7 +169,13 @@ export default function HomePage() {
         <div className="divide-y divide-border">
           {posts.length === 0 ? (
             <div className="p-12 text-center">
-              <p className="text-muted-foreground">No posts yet. Be the first to post!</p>
+              <p className="text-muted-foreground">
+                {activeTab === 'following' 
+                  ? following.size === 0
+                    ? "You're not following anyone yet. Follow some users to see their posts here!"
+                    : "No posts from people you're following yet."
+                  : "No posts yet. Be the first to post!"}
+              </p>
             </div>
           ) : (
             posts.map((post) => (

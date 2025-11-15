@@ -3,10 +3,13 @@ import { PostCard } from '@/components/PostCard'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { Bookmark } from 'lucide-react'
 import { getBookmarkedPosts, type Post } from '@/lib/mockData'
+import { useToast } from '@/hooks/useToast'
 
 export default function BookmarksPage() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [following, setFollowing] = useState<Set<string>>(new Set())
+  const { toast } = useToast()
 
   useEffect(() => {
     setTimeout(() => {
@@ -33,6 +36,68 @@ export default function BookmarksPage() {
 
   const handleBookmark = (postId: string) => {
     setPosts(posts.filter(post => post.id !== postId))
+    toast({
+      description: 'Removed from bookmarks',
+    })
+  }
+
+  const handleCopyLink = (postId: string) => {
+    const url = `${window.location.origin}/post/${postId}`
+    navigator.clipboard.writeText(url)
+    toast({
+      description: 'Link copied to clipboard',
+    })
+  }
+
+  const handleShare = (postId: string) => {
+    toast({
+      description: 'Post shared',
+    })
+  }
+
+  const handleMute = (userId: string) => {
+    toast({
+      description: 'User muted',
+    })
+  }
+
+  const handleBlock = (userId: string) => {
+    toast({
+      description: 'User blocked',
+    })
+  }
+
+  const handleReport = (postId: string) => {
+    toast({
+      description: 'Post reported',
+    })
+  }
+
+  const handleDelete = (postId: string) => {
+    setPosts(posts.filter(post => post.id !== postId))
+    toast({
+      description: 'Post deleted',
+    })
+  }
+
+  const handleFollow = (userId: string) => {
+    const isFollowingUser = following.has(userId)
+    
+    if (isFollowingUser) {
+      setFollowing(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(userId)
+        return newSet
+      })
+      toast({
+        description: 'User unfollowed',
+      })
+    } else {
+      setFollowing(prev => new Set(prev).add(userId))
+      toast({
+        description: 'User followed',
+      })
+    }
   }
 
   return (
@@ -76,6 +141,13 @@ export default function BookmarksPage() {
               onLike={handleLike}
               onReshare={handleReshare}
               onBookmark={handleBookmark}
+              onCopyLink={handleCopyLink}
+              onShare={handleShare}
+              onMute={handleMute}
+              onBlock={handleBlock}
+              onReport={handleReport}
+              onDelete={handleDelete}
+              onFollow={handleFollow}
             />
           ))}
         </div>

@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Avatar, AvatarFallback, AvatarImage } from './ui/Avatar'
 import { Button } from './ui/Button'
 import {
@@ -43,6 +43,7 @@ export function PostCard({
   onFollow,
 }: PostCardProps) {
   const { currentUser } = useAuth()
+  const navigate = useNavigate()
   const isOwnPost = currentUser?.id === post.author.id
   
   const initials = post.author.displayName
@@ -201,6 +202,11 @@ export function PostCard({
               variant="ghost"
               size="sm"
               className="flex items-center gap-2 hover:text-foreground rounded-full"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                navigate(`/post/${post.id}`)
+              }}
             >
               <MessageCircle className="w-4 h-4" />
               <span className="text-sm">{post.replyCount}</span>
@@ -240,6 +246,11 @@ export function PostCard({
               variant="ghost"
               size="sm"
               className="flex items-center gap-2 hover:text-foreground rounded-full"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                handleShare()
+              }}
             >
               <Share2 className="w-4 h-4" />
             </Button>

@@ -21,7 +21,7 @@ ReactDOM.createRoot(rootElement).render(
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <SuiClientProvider networks={networkConfig} defaultNetwork="testnet">
-          <WalletProvider autoConnect>
+          <WalletProvider autoConnect={false}>
             <BrowserRouter>
               <App />
             </BrowserRouter>

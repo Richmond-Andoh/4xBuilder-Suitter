@@ -14,6 +14,7 @@ const MessagesPage = lazy(() => import('./pages/MessagesPage'))
 const NFTGalleryPage = lazy(() => import('./pages/NFTGalleryPage'))
 const BookmarksPage = lazy(() => import('./pages/BookmarksPage'))
 const ListsPage = lazy(() => import('./pages/ListsPage'))
+const ListDetailPage = lazy(() => import('./pages/ListDetailPage'))
 const ProfilePage = lazy(() => import('./pages/ProfilePage'))
 const PostDetailPage = lazy(() => import('./pages/PostDetailPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
@@ -32,6 +33,7 @@ function App() {
               <Route path="/nft-gallery" element={<NFTGalleryPage />} />
               <Route path="/bookmarks" element={<BookmarksPage />} />
               <Route path="/lists" element={<ListsPage />} />
+              <Route path="/lists/:id" element={<ListDetailPage />} />
               <Route path="/profile/:id?" element={<ProfilePage />} />
               <Route path="/post/:id" element={<PostDetailPage />} />
               <Route path="/settings" element={<SettingsPage />} />

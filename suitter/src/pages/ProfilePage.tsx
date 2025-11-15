@@ -36,6 +36,7 @@ import { format } from 'date-fns'
 import { getUserById, getPosts, getRepliesByUserId, getMediaPostsByUserId, getLikedPostsByUserId, mockReplies, mockMediaPosts, mockLikedPosts, type User, type Post } from '@/lib/mockData'
 import { useAuth } from '@/context/AuthContext'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/hooks/useToast'
 
 export default function ProfilePage() {
   const { id } = useParams()
@@ -55,6 +56,8 @@ export default function ProfilePage() {
   const [editWebsite, setEditWebsite] = useState('')
   const [editAvatar, setEditAvatar] = useState('')
   const [editBanner, setEditBanner] = useState('')
+  const [following, setFollowing] = useState<Set<string>>(new Set())
+  const { toast } = useToast()
   
   const isOwnProfile = !id || id === currentUser?.id
 
@@ -232,6 +235,71 @@ export default function ProfilePage() {
         ? { ...post, bookmarked: !post.bookmarked }
         : post
     ))
+    toast({
+      description: posts.find(p => p.id === postId)?.bookmarked ? 'Removed from bookmarks' : 'Added to bookmarks',
+    })
+  }
+
+  const handleCopyLink = (postId: string) => {
+    const url = `${window.location.origin}/post/${postId}`
+    navigator.clipboard.writeText(url)
+    toast({
+      description: 'Link copied to clipboard',
+    })
+  }
+
+  const handleShare = (postId: string) => {
+    toast({
+      description: 'Post shared',
+    })
+  }
+
+  const handleMute = (userId: string) => {
+    toast({
+      description: 'User muted',
+    })
+  }
+
+  const handleBlock = (userId: string) => {
+    toast({
+      description: 'User blocked',
+    })
+  }
+
+  const handleReport = (postId: string) => {
+    toast({
+      description: 'Post reported',
+    })
+  }
+
+  const handleDelete = (postId: string) => {
+    setPosts(posts.filter(post => post.id !== postId))
+    setReplies(replies.filter(post => post.id !== postId))
+    setMediaPosts(mediaPosts.filter(post => post.id !== postId))
+    setLikedPosts(likedPosts.filter(post => post.id !== postId))
+    toast({
+      description: 'Post deleted',
+    })
+  }
+
+  const handleFollowUser = (userId: string) => {
+    const isFollowingUser = following.has(userId)
+    
+    if (isFollowingUser) {
+      setFollowing(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(userId)
+        return newSet
+      })
+      toast({
+        description: 'User unfollowed',
+      })
+    } else {
+      setFollowing(prev => new Set(prev).add(userId))
+      toast({
+        description: 'User followed',
+      })
+    }
   }
 
   const handleSaveProfile = () => {
@@ -545,6 +613,13 @@ export default function ProfilePage() {
                     onLike={handleLike}
                     onReshare={handleReshare}
                     onBookmark={handleBookmark}
+                    onCopyLink={handleCopyLink}
+                    onShare={handleShare}
+                    onMute={handleMute}
+                    onBlock={handleBlock}
+                    onReport={handleReport}
+                    onDelete={handleDelete}
+                    onFollow={handleFollow}
                   />
                 ))}
               </div>
@@ -567,6 +642,13 @@ export default function ProfilePage() {
                     onLike={handleLike}
                     onReshare={handleReshare}
                     onBookmark={handleBookmark}
+                    onCopyLink={handleCopyLink}
+                    onShare={handleShare}
+                    onMute={handleMute}
+                    onBlock={handleBlock}
+                    onReport={handleReport}
+                    onDelete={handleDelete}
+                    onFollow={handleFollow}
                   />
                 ))}
               </div>
@@ -589,6 +671,13 @@ export default function ProfilePage() {
                     onLike={handleLike}
                     onReshare={handleReshare}
                     onBookmark={handleBookmark}
+                    onCopyLink={handleCopyLink}
+                    onShare={handleShare}
+                    onMute={handleMute}
+                    onBlock={handleBlock}
+                    onReport={handleReport}
+                    onDelete={handleDelete}
+                    onFollow={handleFollow}
                   />
                 ))}
               </div>
@@ -611,6 +700,13 @@ export default function ProfilePage() {
                     onLike={handleLike}
                     onReshare={handleReshare}
                     onBookmark={handleBookmark}
+                    onCopyLink={handleCopyLink}
+                    onShare={handleShare}
+                    onMute={handleMute}
+                    onBlock={handleBlock}
+                    onReport={handleReport}
+                    onDelete={handleDelete}
+                    onFollow={handleFollow}
                   />
                 ))}
               </div>

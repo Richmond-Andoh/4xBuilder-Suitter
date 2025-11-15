@@ -5,11 +5,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar'
 import { Button } from '@/components/ui/Button'
 import { Textarea } from '@/components/ui/Textarea'
 import { Skeleton } from '@/components/ui/Skeleton'
-import { ArrowLeft, Heart, MessageCircle } from 'lucide-react'
+import { ArrowLeft, Heart, MessageCircle, Send } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { getPostById, type Post, type Reply } from '@/lib/mockData'
 import { useAuth } from '@/context/AuthContext'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/hooks/useToast'
+import { EmojiPicker } from '@/components/EmojiPicker'
 
 export default function PostDetailPage() {
   const { id } = useParams()
@@ -18,6 +20,8 @@ export default function PostDetailPage() {
   const [replies, setReplies] = useState<Reply[]>([])
   const [replyContent, setReplyContent] = useState('')
   const [loading, setLoading] = useState(true)
+  const [following, setFollowing] = useState<Set<string>>(new Set())
+  const { toast } = useToast()
 
   useEffect(() => {
     if (id) {
@@ -78,6 +82,92 @@ export default function PostDetailPage() {
     setPost({ ...post, replyCount: post.replyCount + 1 })
   }
 
+  const handleLike = (postId: string) => {
+    if (post && post.id === postId) {
+      setPost({ ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 })
+    }
+  }
+
+  const handleReshare = (postId: string) => {
+    if (post && post.id === postId) {
+      setPost({ ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 })
+      toast({
+        description: 'Post reshared',
+      })
+    }
+  }
+
+  const handleBookmark = (postId: string) => {
+    if (post && post.id === postId) {
+      setPost({ ...post, bookmarked: !post.bookmarked })
+      toast({
+        description: post.bookmarked ? 'Removed from bookmarks' : 'Added to bookmarks',
+      })
+    }
+  }
+
+  const handleCopyLink = (postId: string) => {
+    const url = `${window.location.origin}/post/${postId}`
+    navigator.clipboard.writeText(url)
+    toast({
+      description: 'Link copied to clipboard',
+    })
+  }
+
+  const handleShare = (postId: string) => {
+    toast({
+      description: 'Post shared',
+    })
+  }
+
+  const handleMute = (userId: string) => {
+    toast({
+      description: 'User muted',
+    })
+  }
+
+  const handleBlock = (userId: string) => {
+    toast({
+      description: 'User blocked',
+    })
+  }
+
+  const handleReport = (postId: string) => {
+    toast({
+      description: 'Post reported',
+    })
+  }
+
+  const handleDelete = (postId: string) => {
+    if (post && post.id === postId) {
+      // Navigate away since post is deleted
+      window.location.href = '/'
+    }
+    toast({
+      description: 'Post deleted',
+    })
+  }
+
+  const handleFollow = (userId: string) => {
+    const isFollowingUser = following.has(userId)
+    
+    if (isFollowingUser) {
+      setFollowing(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(userId)
+        return newSet
+      })
+      toast({
+        description: 'User unfollowed',
+      })
+    } else {
+      setFollowing(prev => new Set(prev).add(userId))
+      toast({
+        description: 'User followed',
+      })
+    }
+  }
+
   if (loading) {
     return (
       <div className="space-y-6 p-6">
@@ -115,7 +205,19 @@ export default function PostDetailPage() {
 
       {/* Post */}
       <div className="border-b border-border">
-        <PostCard post={post} />
+        <PostCard 
+          post={post}
+          onLike={handleLike}
+          onReshare={handleReshare}
+          onBookmark={handleBookmark}
+          onCopyLink={handleCopyLink}
+          onShare={handleShare}
+          onMute={handleMute}
+          onBlock={handleBlock}
+          onReport={handleReport}
+          onDelete={handleDelete}
+          onFollow={handleFollow}
+        />
       </div>
 
       {/* Reply Composer */}
@@ -127,18 +229,30 @@ export default function PostDetailPage() {
               <AvatarFallback>{currentUser.displayName[0]}</AvatarFallback>
             </Avatar>
             <div className="flex-1 space-y-2">
-              <Textarea
-                placeholder="Post your reply..."
-                value={replyContent}
-                onChange={(e) => setReplyContent(e.target.value)}
-                rows={3}
-              />
-              <div className="flex justify-end">
+              <div className="relative">
+                <Textarea
+                  placeholder="Post your reply..."
+                  value={replyContent}
+                  onChange={(e) => setReplyContent(e.target.value)}
+                  rows={3}
+                  className="pr-10"
+                />
+                <div className="absolute bottom-2 right-2">
+                  <EmojiPicker
+                    onEmojiSelect={(emoji) => {
+                      setReplyContent(prev => prev + emoji)
+                    }}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
                 <Button
                   onClick={handleReply}
                   disabled={!replyContent.trim()}
                   size="sm"
+                  className="gap-2"
                 >
+                  <Send className="w-4 h-4" />
                   Reply
                 </Button>
               </div>

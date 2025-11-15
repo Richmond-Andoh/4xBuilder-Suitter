@@ -51,14 +51,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const user: User = {
                   id: address.slice(0, 10),
                   address,
-                  username: `user_${address.slice(2, 8)}`,
-                  displayName: account?.name || `User ${address.slice(2, 8)}`,
+                  username: 'Maranatha.sui',
+                  displayName: account?.name || 'Maranatha',
                   bio: '',
                   avatar: account?.avatar || '/placeholder-user.jpg',
                   banner: '/placeholder.jpg',
                   joinedAt: new Date(),
                   followersCount: 0,
                   followingCount: 0,
+                  email: 'maranathaokeleyodai@gmail.com',
                 }
                 setState({ isConnected: true, address, user })
               } else {
@@ -103,14 +104,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const user: User = {
         id: address.slice(0, 10),
         address,
-        username: `user_${address.slice(2, 8)}`,
-        displayName: account?.name || `User ${address.slice(2, 8)}`,
+        username: 'Maranatha.sui',
+        displayName: account?.name || 'Maranatha',
         bio: '',
         avatar: account?.avatar || '/placeholder-user.jpg',
         banner: '/placeholder.jpg',
         joinedAt: new Date(),
         followersCount: 0,
         followingCount: 0,
+        email: 'maranathaokeleyodai@gmail.com',
       }
 
       // Check if profile exists on-chain, if not create it

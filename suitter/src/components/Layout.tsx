@@ -1,7 +1,7 @@
-import { ReactNode, useState } from 'react'
+import { ReactNode, useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
-import { WalletConnectButton } from './WalletConnectButton'
+import { ConnectButton } from '@mysten/dapp-kit'
 import { Button } from './ui/Button'
 import { Avatar, AvatarFallback, AvatarImage } from './ui/Avatar'
 import { CreatePostModal } from './CreatePostModal'
@@ -33,6 +33,28 @@ export default function Layout({ children }: LayoutProps) {
   const { toast } = useToast()
   const [showCreatePost, setShowCreatePost] = useState(false)
   const [following, setFollowing] = useState<Set<string>>(new Set())
+  
+  // Load following state from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem('suitter_following')
+    if (stored) {
+      try {
+        const followingArray = JSON.parse(stored)
+        setFollowing(new Set(followingArray))
+      } catch (error) {
+        console.error('Failed to parse following state:', error)
+      }
+    }
+  }, [])
+
+  // Save following state to localStorage whenever it changes
+  useEffect(() => {
+    if (following.size > 0) {
+      localStorage.setItem('suitter_following', JSON.stringify(Array.from(following)))
+    } else {
+      localStorage.removeItem('suitter_following')
+    }
+  }, [following])
   
   // Get suggested users (exclude current user if connected)
   const suggestedUsers = mockUsers
@@ -79,7 +101,7 @@ export default function Layout({ children }: LayoutProps) {
           </div>
 
           <div className="flex items-center justify-end gap-4 flex-1">
-            <WalletConnectButton />
+            <ConnectButton />
           </div>
         </div>
       </header>

@@ -10,6 +10,7 @@ export interface User {
   banner: string
   location?: string
   website?: string
+  email?: string
   joinedAt: Date
   followersCount: number
   followingCount: number

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Input } from '@/components/ui/Input'
 import { PostCard } from '@/components/PostCard'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar'
@@ -9,9 +10,12 @@ import { Link } from 'react-router-dom'
 import { getPosts, mockUsers, type Post, type User } from '@/lib/mockData'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/hooks/useToast'
 
 export default function ExplorePage() {
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const urlQuery = searchParams.get('q') || ''
+  const [searchQuery, setSearchQuery] = useState(urlQuery)
   const [searchResults, setSearchResults] = useState<{ posts: Post[]; users: User[] }>({ posts: [], users: [] })
   const [trendingPosts, setTrendingPosts] = useState<Post[]>([])
   const [trendingTopics, setTrendingTopics] = useState<Array<{ name: string; posts: number }>>([
@@ -22,32 +26,182 @@ export default function ExplorePage() {
     { name: 'Blockchain', posts: 3210 },
   ])
   const [loading, setLoading] = useState(false)
+  const [following, setFollowing] = useState<Set<string>>(new Set())
+  const [posts, setPosts] = useState<Post[]>([])
   const debouncedSearch = useDebounce(searchQuery, 300)
+  const { toast } = useToast()
+
+  // Initialize search query from URL
+  useEffect(() => {
+    if (urlQuery) {
+      setSearchQuery(urlQuery)
+    }
+  }, [urlQuery])
 
   useEffect(() => {
     if (debouncedSearch) {
       setLoading(true)
-      // Simulate search
+      // Update URL
+      setSearchParams({ q: debouncedSearch })
+      // Simulate search - filter posts that contain the search term or hashtag
       setTimeout(() => {
+        const searchLower = debouncedSearch.toLowerCase()
         const posts = getPosts().filter(p => 
-          p.content.toLowerCase().includes(debouncedSearch.toLowerCase())
+          p.content.toLowerCase().includes(searchLower) ||
+          p.content.toLowerCase().includes(`#${searchLower}`)
         )
         const users = mockUsers.filter(u => 
-          u.displayName.toLowerCase().includes(debouncedSearch.toLowerCase()) ||
-          u.username.toLowerCase().includes(debouncedSearch.toLowerCase())
+          u.displayName.toLowerCase().includes(searchLower) ||
+          u.username.toLowerCase().includes(searchLower)
         )
         setSearchResults({ posts, users })
         setLoading(false)
       }, 300)
     } else {
       setSearchResults({ posts: [], users: [] })
+      setSearchParams({})
     }
-  }, [debouncedSearch])
+  }, [debouncedSearch, setSearchParams])
 
   useEffect(() => {
     // Load trending posts
-    setTrendingPosts(getPosts().sort((a, b) => b.likeCount - a.likeCount).slice(0, 5))
+    const trending = getPosts().sort((a, b) => b.likeCount - a.likeCount).slice(0, 5)
+    setTrendingPosts(trending)
+    setPosts(trending)
   }, [])
+
+  const handleLike = (postId: string) => {
+    setPosts(posts.map(post => 
+      post.id === postId 
+        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+        : post
+    ))
+    setTrendingPosts(trendingPosts.map(post => 
+      post.id === postId 
+        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+        : post
+    ))
+    setSearchResults(prev => ({
+      ...prev,
+      posts: prev.posts.map(post => 
+        post.id === postId 
+          ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+          : post
+      )
+    }))
+  }
+
+  const handleReshare = (postId: string) => {
+    setPosts(posts.map(post => 
+      post.id === postId 
+        ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+        : post
+    ))
+    setTrendingPosts(trendingPosts.map(post => 
+      post.id === postId 
+        ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+        : post
+    ))
+    setSearchResults(prev => ({
+      ...prev,
+      posts: prev.posts.map(post => 
+        post.id === postId 
+          ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+          : post
+      )
+    }))
+    toast({
+      description: 'Post reshared',
+    })
+  }
+
+  const handleBookmark = (postId: string) => {
+    setPosts(posts.map(post => 
+      post.id === postId 
+        ? { ...post, bookmarked: !post.bookmarked }
+        : post
+    ))
+    setTrendingPosts(trendingPosts.map(post => 
+      post.id === postId 
+        ? { ...post, bookmarked: !post.bookmarked }
+        : post
+    ))
+    setSearchResults(prev => ({
+      ...prev,
+      posts: prev.posts.map(post => 
+        post.id === postId 
+          ? { ...post, bookmarked: !post.bookmarked }
+          : post
+      )
+    }))
+    toast({
+      description: posts.find(p => p.id === postId)?.bookmarked ? 'Removed from bookmarks' : 'Added to bookmarks',
+    })
+  }
+
+  const handleCopyLink = (postId: string) => {
+    const url = `${window.location.origin}/post/${postId}`
+    navigator.clipboard.writeText(url)
+    toast({
+      description: 'Link copied to clipboard',
+    })
+  }
+
+  const handleShare = (postId: string) => {
+    toast({
+      description: 'Post shared',
+    })
+  }
+
+  const handleMute = (userId: string) => {
+    toast({
+      description: 'User muted',
+    })
+  }
+
+  const handleBlock = (userId: string) => {
+    toast({
+      description: 'User blocked',
+    })
+  }
+
+  const handleReport = (postId: string) => {
+    toast({
+      description: 'Post reported',
+    })
+  }
+
+  const handleDelete = (postId: string) => {
+    setPosts(posts.filter(post => post.id !== postId))
+    setTrendingPosts(trendingPosts.filter(post => post.id !== postId))
+    setSearchResults(prev => ({
+      ...prev,
+      posts: prev.posts.filter(post => post.id !== postId)
+    }))
+    toast({
+      description: 'Post deleted',
+    })
+  }
+
+  const handleFollow = (userId: string) => {
+    const isFollowingUser = following.has(userId)
+    
+    if (isFollowingUser) {
+      setFollowing(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(userId)
+        return newSet
+      })
+      toast({
+        description: 'User unfollowed',
+      })
+    } else {
+      setFollowing(prev => new Set(prev).add(userId))
+      toast({
+        description: 'User followed',
+      })
+    }
+  }
 
   return (
     <div className="flex flex-col">
@@ -107,7 +261,20 @@ export default function ExplorePage() {
                     <h2 className="text-lg font-semibold mb-4">Posts</h2>
                     <div className="space-y-4">
                       {searchResults.posts.map(post => (
-                        <PostCard key={post.id} post={post} />
+                        <PostCard 
+                          key={post.id} 
+                          post={post}
+                          onLike={handleLike}
+                          onReshare={handleReshare}
+                          onBookmark={handleBookmark}
+                          onCopyLink={handleCopyLink}
+                          onShare={handleShare}
+                          onMute={handleMute}
+                          onBlock={handleBlock}
+                          onReport={handleReport}
+                          onDelete={handleDelete}
+                          onFollow={handleFollow}
+                        />
                       ))}
                     </div>
                   </div>
@@ -186,7 +353,19 @@ export default function ExplorePage() {
                         </div>
                       </div>
                     )}
-                    <PostCard post={post} />
+                    <PostCard 
+                      post={post}
+                      onLike={handleLike}
+                      onReshare={handleReshare}
+                      onBookmark={handleBookmark}
+                      onCopyLink={handleCopyLink}
+                      onShare={handleShare}
+                      onMute={handleMute}
+                      onBlock={handleBlock}
+                      onReport={handleReport}
+                      onDelete={handleDelete}
+                      onFollow={handleFollow}
+                    />
                   </div>
                 ))}
               </div>
