@@ -1,16 +1,36 @@
-import { useCallback } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { SuiClient, getFullnodeUrl } from '@mysten/sui/client'
 import { Transaction } from '@mysten/sui/transactions'
 import { useAuth } from '@/context/AuthContext'
 import { User, Post, Reply } from '@/lib/types'
+import { SUITTER_PACKAGE_ID, SUITTER_MODULE } from '@/lib/constants'
+import {
+  queryProfileByOwner,
+  querySuitById,
+  querySuitsByAuthor,
+  queryLikesBySuitId,
+  queryCommentsBySuitId,
+  checkIfLiked,
+  queryAllSuits,
+  type OnChainProfile,
+  type OnChainSuit,
+  type OnChainLike,
+  type OnChainComment,
+} from '@/lib/suitterQueries'
+import {
+  addSuitId,
+  addLikeId,
+  addCommentId,
+  getSuitIds,
+  getAuthorSuitIds,
+  getSuitLikeIds,
+  getSuitCommentIds,
+  extractObjectIdsFromTransaction,
+} from '@/lib/objectIndex'
 
 // Sui network configuration
-const SUI_NETWORK = 'testnet' // Change to 'mainnet' for production
+const SUI_NETWORK = import.meta.env.VITE_SUI_NETWORK || 'testnet' // Change to 'mainnet' for production
 const FULLNODE_URL = getFullnodeUrl(SUI_NETWORK)
-
-// Contract addresses (these should be set from environment variables in production)
-const PROFILE_PACKAGE_ID = import.meta.env.VITE_PROFILE_PACKAGE_ID || '0x0'
-const POST_PACKAGE_ID = import.meta.env.VITE_POST_PACKAGE_ID || '0x0'
 
 let suiClient: SuiClient | null = null
 
@@ -21,264 +41,548 @@ export function getSuiClient(): SuiClient {
   return suiClient
 }
 
+/**
+ * Convert on-chain Profile to app User type
+ */
+function onChainProfileToUser(profile: OnChainProfile, address: string): User {
+  return {
+    id: profile.id,
+    address: profile.owner,
+    username: profile.username,
+    displayName: profile.username, // Use username as display name if not available
+    bio: profile.bio,
+    avatar: profile.image_url || '/placeholder-user.jpg',
+    banner: '/placeholder.jpg',
+    joinedAt: new Date(), // Timestamp not stored in contract
+    followersCount: 0, // Not tracked in contract
+    followingCount: 0, // Not tracked in contract
+  }
+}
+
+/**
+ * Convert on-chain Suit to app Post type
+ */
+async function onChainSuitToPost(
+  suit: OnChainSuit,
+  client: SuiClient,
+  currentUserAddress?: string
+): Promise<Post> {
+  // Get profile for author
+  const authorProfile = await queryProfileByOwner(client, suit.author)
+  
+  // Get likes and comments from index
+  const likeIds = getSuitLikeIds(suit.id)
+  const commentIds = getSuitCommentIds(suit.id)
+  
+  const likes = await queryLikesBySuitId(client, suit.id, likeIds)
+  const comments = await queryCommentsBySuitId(client, suit.id, commentIds)
+  
+  // Check if current user liked this post
+  const liked = currentUserAddress ? await checkIfLiked(client, suit.id, currentUserAddress, likeIds) : false
+
+  return {
+    id: suit.id,
+    authorId: suit.author,
+    author: authorProfile
+      ? onChainProfileToUser(authorProfile, suit.author)
+      : {
+          id: suit.author.slice(0, 10),
+          address: suit.author,
+          username: `${suit.author.slice(0, 6)}...${suit.author.slice(-4)}`,
+          displayName: suit.author.slice(0, 6),
+          bio: '',
+          avatar: '/placeholder-user.jpg',
+          banner: '/placeholder.jpg',
+          joinedAt: new Date(),
+          followersCount: 0,
+          followingCount: 0,
+        },
+    content: suit.content,
+    images: [], // Images not supported in current contract
+    createdAt: new Date(suit.timestamp_ms),
+    likeCount: likes.length,
+    reshareCount: 0, // Not supported in contract
+    replyCount: comments.length,
+    liked,
+    reshared: false, // Not supported in contract
+    bookmarked: false, // Not supported in contract
+  }
+}
+
 export function useSui() {
   const { state } = useAuth()
+  const [profileObjectId, setProfileObjectId] = useState<string | null>(null)
+
+  // Load profile object ID when address changes
+  useEffect(() => {
+    if (state.address) {
+      loadProfileObjectId(state.address)
+    } else {
+      setProfileObjectId(null)
+    }
+  }, [state.address])
+
+  const loadProfileObjectId = async (address: string) => {
+    try {
+      const client = getSuiClient()
+      const structType = `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::Profile`
+      const objects = await client.getOwnedObjects({
+        owner: address,
+        filter: {
+          StructType: structType,
+        },
+        options: {
+          showContent: false,
+        },
+      })
+
+      if (objects.data.length > 0) {
+        setProfileObjectId(objects.data[0].data?.objectId || null)
+      }
+    } catch (error) {
+      console.error('Error loading profile object ID:', error)
+    }
+  }
 
   // Profile operations
-  const createProfile = useCallback(async (displayName: string, bio: string, avatar?: string, banner?: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+  const createProfile = useCallback(
+    async (
+      username: string,
+      bio: string,
+      imageUrl: string = ''
+    ): Promise<string> => {
+      if (!state.address || !window.slushWallet) {
+        throw new Error('Wallet not connected')
+      }
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    // tx.moveCall({
-    //   target: `${PROFILE_PACKAGE_ID}::profile::create`,
-    //   arguments: [displayName, bio, avatar || '', banner || ''],
-    // })
+      const tx = new Transaction()
 
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      // Convert strings to vector<u8> (bytes)
+      const usernameBytes = new TextEncoder().encode(username)
+      const bioBytes = new TextEncoder().encode(bio)
+      const imageUrlBytes = new TextEncoder().encode(imageUrl)
 
-    return result.digest
-  }, [state.address])
+      tx.moveCall({
+        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::create_profile`,
+        arguments: [
+          tx.pure.string(username),
+          tx.pure.string(bio),
+          tx.pure.string(imageUrl),
+        ],
+      })
 
-  const updateProfile = useCallback(async (displayName?: string, bio?: string, avatar?: string, banner?: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+      const result = await window.slushWallet.signAndExecuteTransaction({
+        transactionBlock: tx,
+      })
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      // Extract and store profile object ID
+      const objectIds = extractObjectIdsFromTransaction(result, 'Profile')
+      if (objectIds.length > 0) {
+        setProfileObjectId(objectIds[0])
+      } else {
+        // Fallback: reload profile object ID
+        await loadProfileObjectId(state.address)
+      }
 
-    return result.digest
-  }, [state.address])
+      return result.digest
+    },
+    [state.address]
+  )
 
-  const getProfile = useCallback(async (address: string): Promise<User | null> => {
-    const client = getSuiClient()
-    
-    // TODO: Query on-chain profile data
-    // For now, return null (will be handled by mock data)
-    return null
-  }, [])
+  const updateProfile = useCallback(
+    async (
+      profileObjectId: string,
+      newUsername?: string,
+      newBio?: string,
+      newImageUrl?: string
+    ): Promise<string> => {
+      if (!state.address || !window.slushWallet) {
+        throw new Error('Wallet not connected')
+      }
+
+      if (!profileObjectId) {
+        throw new Error('Profile object ID is required')
+      }
+
+      const tx = new Transaction()
+
+      // Get the profile object
+      const profileArg = tx.object(profileObjectId)
+
+      // Use current values if new values not provided
+      const client = getSuiClient()
+      const currentProfile = await queryProfileByOwner(client, state.address)
+      
+      const username = newUsername ?? currentProfile?.username ?? ''
+      const bio = newBio ?? currentProfile?.bio ?? ''
+      const imageUrl = newImageUrl ?? currentProfile?.image_url ?? ''
+
+      tx.moveCall({
+        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::update_profile`,
+        arguments: [
+          profileArg,
+          tx.pure.string(username),
+          tx.pure.string(bio),
+          tx.pure.string(imageUrl),
+        ],
+      })
+
+      const result = await window.slushWallet.signAndExecuteTransaction({
+        transactionBlock: tx,
+      })
+
+      return result.digest
+    },
+    [state.address]
+  )
+
+  const getProfile = useCallback(
+    async (address: string): Promise<User | null> => {
+      const client = getSuiClient()
+      const profile = await queryProfileByOwner(client, address)
+      
+      if (!profile) {
+        return null
+      }
+
+      return onChainProfileToUser(profile, address)
+    },
+    []
+  )
 
   // Post operations
-  const createPost = useCallback(async (content: string, images: string[] = []): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+  const createPost = useCallback(
+    async (content: string, images: string[] = []): Promise<string> => {
+      if (!state.address || !window.slushWallet) {
+        throw new Error('Wallet not connected')
+      }
 
-    if (content.length > 280) {
-      throw new Error('Post content exceeds 280 characters')
-    }
+      if (content.length > 280) {
+        throw new Error('Post content exceeds 280 characters')
+      }
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      const tx = new Transaction()
 
-    return result.digest
-  }, [state.address])
+      // Convert content to vector<u8> (bytes)
+      tx.moveCall({
+        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::post_suit`,
+        arguments: [tx.pure.string(content)],
+      })
 
-  const deletePost = useCallback(async (postId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+      const result = await window.slushWallet.signAndExecuteTransaction({
+        transactionBlock: tx,
+      })
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      // Extract and index the created Suit object ID
+      const objectIds = extractObjectIdsFromTransaction(result, 'Suit')
+      if (objectIds.length > 0 && state.address) {
+        addSuitId(objectIds[0], state.address)
+      }
 
-    return result.digest
-  }, [state.address])
+      return result.digest
+    },
+    [state.address]
+  )
 
-  const getPosts = useCallback(async (limit = 20, offset = 0): Promise<Post[]> => {
-    const client = getSuiClient()
-    
-    // TODO: Query on-chain posts
-    // For now, return empty array (will be handled by mock data)
-    return []
-  }, [])
+  const deletePost = useCallback(
+    async (postId: string): Promise<string> => {
+      // Note: The smart contract doesn't have a delete function
+      // This would need to be implemented in the contract
+      throw new Error('Delete post is not supported by the smart contract')
+    },
+    []
+  )
 
-  const getPostById = useCallback(async (postId: string): Promise<Post | null> => {
-    const client = getSuiClient()
-    
-    // TODO: Query on-chain post
-    return null
-  }, [])
+  const getPosts = useCallback(
+    async (limit = 20, offset = 0): Promise<Post[]> => {
+      const client = getSuiClient()
+      
+      // Get Suit IDs from index
+      const suitIds = getSuitIds()
+      const paginatedIds = suitIds.slice(offset, offset + limit)
+      
+      if (paginatedIds.length === 0) {
+        return []
+      }
+
+      // Query suits by IDs
+      const suits = await queryAllSuits(client, paginatedIds)
+      
+      // Convert to Post objects
+      const posts = await Promise.all(
+        suits.map(suit => onChainSuitToPost(suit, client, state.address || undefined))
+      )
+      
+      return posts
+    },
+    [state.address]
+  )
+
+  const getPostById = useCallback(
+    async (postId: string): Promise<Post | null> => {
+      const client = getSuiClient()
+      const suit = await querySuitById(client, postId)
+      
+      if (!suit) {
+        return null
+      }
+
+      return onChainSuitToPost(suit, client, state.address || undefined)
+    },
+    [state.address]
+  )
+
+  const getPostsByAuthor = useCallback(
+    async (authorAddress: string, limit = 20, offset = 0): Promise<Post[]> => {
+      const client = getSuiClient()
+      
+      // Get Suit IDs for this author from index
+      const authorSuitIds = getAuthorSuitIds(authorAddress)
+      const paginatedIds = authorSuitIds.slice(offset, offset + limit)
+      
+      if (paginatedIds.length === 0) {
+        return []
+      }
+
+      // Query suits by IDs and filter by author
+      const suits = await querySuitsByAuthor(client, authorAddress, paginatedIds)
+      
+      // Convert to Post objects
+      const posts = await Promise.all(
+        suits.map(suit => onChainSuitToPost(suit, client, state.address || undefined))
+      )
+      
+      return posts
+    },
+    [state.address]
+  )
 
   // Interaction operations
-  const likePost = useCallback(async (postId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+  const likePost = useCallback(
+    async (suitId: string): Promise<string> => {
+      if (!state.address || !window.slushWallet) {
+        throw new Error('Wallet not connected')
+      }
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      const tx = new Transaction()
 
-    return result.digest
-  }, [state.address])
+      // Convert suitId string to ID type
+      tx.moveCall({
+        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::add_like`,
+        arguments: [tx.pure.id(suitId)],
+      })
 
-  const unlikePost = useCallback(async (postId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+      const result = await window.slushWallet.signAndExecuteTransaction({
+        transactionBlock: tx,
+      })
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      // Extract and index the created Like object ID
+      const objectIds = extractObjectIdsFromTransaction(result, 'Like')
+      if (objectIds.length > 0) {
+        addLikeId(objectIds[0], suitId)
+      }
 
-    return result.digest
-  }, [state.address])
+      return result.digest
+    },
+    [state.address]
+  )
 
-  const resharePost = useCallback(async (postId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+  const unlikePost = useCallback(
+    async (postId: string): Promise<string> => {
+      // Note: The smart contract doesn't have an unlike function
+      // Likes are permanent in the current contract design
+      throw new Error('Unlike is not supported by the smart contract')
+    },
+    []
+  )
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+  const resharePost = useCallback(
+    async (postId: string): Promise<string> => {
+      // Note: The smart contract doesn't have a reshare function
+      // This would need to be implemented in the contract
+      throw new Error('Reshare is not supported by the smart contract')
+    },
+    []
+  )
 
-    return result.digest
-  }, [state.address])
+  const commentOnPost = useCallback(
+    async (suitId: string, content: string, images: string[] = []): Promise<string> => {
+      if (!state.address || !window.slushWallet) {
+        throw new Error('Wallet not connected')
+      }
 
-  const commentOnPost = useCallback(async (postId: string, content: string, images: string[] = []): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+      const tx = new Transaction()
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      tx.moveCall({
+        target: `${SUITTER_PACKAGE_ID}::${SUITTER_MODULE}::add_comment`,
+        arguments: [
+          tx.pure.id(suitId),
+          tx.pure.string(content),
+        ],
+      })
 
-    return result.digest
-  }, [state.address])
+      const result = await window.slushWallet.signAndExecuteTransaction({
+        transactionBlock: tx,
+      })
 
-  // Follow operations
-  const followUser = useCallback(async (userId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+      // Extract and index the created Comment object ID
+      const objectIds = extractObjectIdsFromTransaction(result, 'Comment')
+      if (objectIds.length > 0) {
+        addCommentId(objectIds[0], suitId)
+      }
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+      return result.digest
+    },
+    [state.address]
+  )
 
-    return result.digest
-  }, [state.address])
+  const getComments = useCallback(
+    async (suitId: string): Promise<Reply[]> => {
+      const client = getSuiClient()
+      
+      // Get Comment IDs for this Suit from index
+      const commentIds = getSuitCommentIds(suitId)
+      
+      // Query comments by IDs
+      const comments = await queryCommentsBySuitId(client, suitId, commentIds)
+      
+      // Convert to Reply objects
+      const replies = await Promise.all(
+        comments.map(async (comment) => {
+          const authorProfile = await queryProfileByOwner(client, comment.author)
+          
+          return {
+            id: comment.id,
+            postId: comment.suit_id,
+            authorId: comment.author,
+            author: authorProfile
+              ? onChainProfileToUser(authorProfile, comment.author)
+              : {
+                  id: comment.author.slice(0, 10),
+                  address: comment.author,
+                  username: `${comment.author.slice(0, 6)}...${comment.author.slice(-4)}`,
+                  displayName: comment.author.slice(0, 6),
+                  bio: '',
+                  avatar: '/placeholder-user.jpg',
+                  banner: '/placeholder.jpg',
+                  joinedAt: new Date(),
+                  followersCount: 0,
+                  followingCount: 0,
+                },
+            content: comment.content,
+            images: [],
+            createdAt: new Date(comment.timestamp_ms),
+            likeCount: 0, // Comments don't have likes in contract
+            liked: false,
+            replies: [],
+          }
+        })
+      )
+      
+      return replies
+    },
+    []
+  )
 
-  const unfollowUser = useCallback(async (userId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
+  // Follow operations (not in smart contract, but kept for compatibility)
+  const followUser = useCallback(
+    async (userId: string): Promise<string> => {
+      // Note: Follow functionality is not in the smart contract
+      // This would need to be implemented in the contract or handled off-chain
+      throw new Error('Follow is not supported by the smart contract')
+    },
+    []
+  )
 
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
+  const unfollowUser = useCallback(
+    async (userId: string): Promise<string> => {
+      // Note: Follow functionality is not in the smart contract
+      throw new Error('Unfollow is not supported by the smart contract')
+    },
+    []
+  )
 
-    return result.digest
-  }, [state.address])
+  const getFollowers = useCallback(
+    async (userId: string, limit = 20, offset = 0): Promise<User[]> => {
+      // Not supported in contract
+      return []
+    },
+    []
+  )
 
-  const getFollowers = useCallback(async (userId: string, limit = 20, offset = 0): Promise<User[]> => {
-    const client = getSuiClient()
-    
-    // TODO: Query on-chain followers
-    return []
-  }, [])
+  const getFollowing = useCallback(
+    async (userId: string, limit = 20, offset = 0): Promise<User[]> => {
+      // Not supported in contract
+      return []
+    },
+    []
+  )
 
-  const getFollowing = useCallback(async (userId: string, limit = 20, offset = 0): Promise<User[]> => {
-    const client = getSuiClient()
-    
-    // TODO: Query on-chain following
-    return []
-  }, [])
+  // Notification operations (not in smart contract)
+  const getNotifications = useCallback(
+    async (limit = 20, offset = 0) => {
+      // Not supported in contract
+      return []
+    },
+    []
+  )
 
-  // Notification operations
-  const getNotifications = useCallback(async (limit = 20, offset = 0) => {
-    const client = getSuiClient()
-    
-    // TODO: Query on-chain notifications
-    return []
-  }, [])
-
-  const markNotificationRead = useCallback(async (notificationId: string): Promise<string> => {
-    if (!state.address || !window.slushWallet) {
-      throw new Error('Wallet not connected')
-    }
-
-    const tx = new Transaction()
-    
-    // TODO: Implement actual contract call
-    const result = await window.slushWallet.signAndExecuteTransaction({
-      transactionBlock: tx,
-    })
-
-    return result.digest
-  }, [state.address])
+  const markNotificationRead = useCallback(
+    async (notificationId: string): Promise<string> => {
+      // Not supported in contract
+      throw new Error('Notifications are not supported by the smart contract')
+    },
+    []
+  )
 
   // Estimate gas for a transaction
-  const estimateGas = useCallback(async (tx: Transaction): Promise<bigint> => {
-    const client = getSuiClient()
-    if (!state.address) {
-      throw new Error('Wallet not connected')
-    }
+  const estimateGas = useCallback(
+    async (tx: Transaction): Promise<bigint> => {
+      const client = getSuiClient()
+      if (!state.address) {
+        throw new Error('Wallet not connected')
+      }
 
-    // TODO: Implement gas estimation
-    return BigInt(1000) // Placeholder
-  }, [state.address])
+      try {
+        // Dry run the transaction to estimate gas
+        const dryRunResult = await client.dryRunTransactionBlock({
+          transactionBlock: await tx.build({ client }),
+        })
+        
+        // Return estimated gas (this is a simplified version)
+        return BigInt(dryRunResult.effects?.gasUsed?.computationCost || 1000)
+      } catch (error) {
+        console.error('Error estimating gas:', error)
+        return BigInt(1000) // Fallback
+      }
+    },
+    [state.address]
+  )
 
   return {
     // Profile
     createProfile,
     updateProfile,
     getProfile,
+    profileObjectId, // Expose profile object ID for update operations
     // Posts
     createPost,
     deletePost,
     getPosts,
     getPostById,
+    getPostsByAuthor,
     // Interactions
     likePost,
     unlikePost,
     resharePost,
     commentOnPost,
-    // Follow
+    getComments,
+    // Follow (not in contract, but kept for compatibility)
     followUser,
     unfollowUser,
     getFollowers,
     getFollowing,
-    // Notifications
+    // Notifications (not in contract)
     getNotifications,
     markNotificationRead,
     // Utilities
@@ -286,4 +590,3 @@ export function useSui() {
     getSuiClient,
   }
 }
-

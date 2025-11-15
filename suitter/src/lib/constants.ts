@@ -26,3 +26,18 @@ export const NOTIFICATION_TYPES = [
   'mention',
 ] as const
 
+// Smart Contract Configuration
+// Get package ID from environment variable or use default
+export const SUITTER_PACKAGE_ID = import.meta.env.VITE_SUITTER_PACKAGE_ID || '0x0'
+
+// Module name from the smart contract
+export const SUITTER_MODULE = 'suitter'
+
+// Struct names from the smart contract
+export const SUITTER_STRUCTS = {
+  PROFILE: 'Profile',
+  SUIT: 'Suit',
+  LIKE: 'Like',
+  COMMENT: 'Comment',
+} as const
+
