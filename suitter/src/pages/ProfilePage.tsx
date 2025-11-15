@@ -1,0 +1,796 @@
+import { useState, useEffect } from 'react'
+import { useParams, Link } from 'react-router-dom'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/Avatar'
+import { Button } from '@/components/ui/Button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/Tabs'
+import { PostCard } from '@/components/PostCard'
+import { Skeleton } from '@/components/ui/Skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/Dialog'
+import { Input } from '@/components/ui/Input'
+import { Textarea } from '@/components/ui/Textarea'
+import { Label } from '@/components/ui/Label'
+import { 
+  UserPlus, 
+  MoreHorizontal, 
+  Edit, 
+  Calendar, 
+  MapPin, 
+  Link as LinkIcon, 
+  Upload, 
+  X as XIcon,
+  Check,
+  MessageCircle,
+  Heart,
+  Repeat2,
+  Image as ImageIcon,
+  Verified
+} from 'lucide-react'
+import { format } from 'date-fns'
+import { getUserById, getPosts, getRepliesByUserId, getMediaPostsByUserId, getLikedPostsByUserId, mockReplies, mockMediaPosts, mockLikedPosts, type User, type Post } from '@/lib/mockData'
+import { useAuth } from '@/context/AuthContext'
+import { cn } from '@/lib/utils'
+
+export default function ProfilePage() {
+  const { id } = useParams()
+  const { currentUser } = useAuth()
+  const [user, setUser] = useState<User | null>(null)
+  const [posts, setPosts] = useState<Post[]>([])
+  const [replies, setReplies] = useState<Post[]>([])
+  const [mediaPosts, setMediaPosts] = useState<Post[]>([])
+  const [likedPosts, setLikedPosts] = useState<Post[]>([])
+  const [activeTab, setActiveTab] = useState('posts')
+  const [loading, setLoading] = useState(true)
+  const [isFollowing, setIsFollowing] = useState(false)
+  const [showEditDialog, setShowEditDialog] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editBio, setEditBio] = useState('')
+  const [editLocation, setEditLocation] = useState('')
+  const [editWebsite, setEditWebsite] = useState('')
+  const [editAvatar, setEditAvatar] = useState('')
+  const [editBanner, setEditBanner] = useState('')
+  
+  const isOwnProfile = !id || id === currentUser?.id
+
+  useEffect(() => {
+    setTimeout(() => {
+      let profileUser: User | null = null
+      
+      if (id) {
+        // Viewing another user's profile by ID
+        profileUser = getUserById(id) || null
+      } else {
+        // Viewing own profile
+        if (currentUser) {
+          profileUser = currentUser
+        } else {
+          // Not connected - show realistic dummy profile
+          profileUser = {
+            id: 'demo',
+            address: '0x1234567890abcdef1234567890abcdef12345678',
+            username: 'sui_builder',
+            displayName: 'Sui Builder',
+            bio: 'Blockchain developer passionate about Web3 and decentralized applications. Building the future on Sui. 🚀 Always learning, always building.',
+            avatar: '/placeholder-user.jpg',
+            banner: '/placeholder.jpg',
+            location: 'San Francisco, CA',
+            website: 'suibuilder.dev',
+            joinedAt: new Date('2023-11-15'),
+            followersCount: 2847,
+            followingCount: 523,
+            isVerified: true,
+          }
+        }
+      }
+      
+      if (profileUser) {
+        setUser(profileUser)
+        setEditName(profileUser.displayName)
+        setEditBio(profileUser.bio || '')
+        setEditLocation(profileUser.location || '')
+        setEditWebsite(profileUser.website || '')
+        setEditAvatar(profileUser.avatar)
+        setEditBanner(profileUser.banner)
+        
+        // Get posts for this user, or use demo data if no posts found
+        const userPosts = getPosts().filter(p => p.authorId === profileUser!.id)
+        const userReplies = getRepliesByUserId(profileUser.id)
+        const userMedia = getMediaPostsByUserId(profileUser.id)
+        const userLiked = getLikedPostsByUserId(profileUser.id)
+        
+        // If no posts found, use demo data to make profile look realistic
+        // For demo/guest users, always show demo data
+        // For other users, show demo data if they have no posts
+        if (userPosts.length === 0) {
+          // Create posts with the user's info
+          const demoPosts = getPosts().slice(0, 8).map((post, index) => ({
+            ...post,
+            id: `demo-post-${index}`,
+            authorId: profileUser.id,
+            author: profileUser,
+          }))
+          setPosts(demoPosts)
+        } else {
+          setPosts(userPosts)
+        }
+        
+        if (userReplies.length === 0) {
+          const demoReplies = mockReplies.slice(0, 5).map((reply, index) => ({
+            ...reply,
+            id: `demo-reply-${index}`,
+            authorId: profileUser.id,
+            author: profileUser,
+          }))
+          setReplies(demoReplies)
+        } else {
+          setReplies(userReplies)
+        }
+        
+        if (userMedia.length === 0) {
+          const demoMedia = mockMediaPosts.slice(0, 6).map((post, index) => ({
+            ...post,
+            id: `demo-media-${index}`,
+            authorId: profileUser.id,
+            author: profileUser,
+          }))
+          setMediaPosts(demoMedia)
+        } else {
+          setMediaPosts(userMedia)
+        }
+        
+        // Liked posts can be from any user, so we don't need to change author
+        if (userLiked.length === 0) {
+          setLikedPosts(mockLikedPosts.slice(0, 7))
+        } else {
+          setLikedPosts(userLiked)
+        }
+      }
+      setLoading(false)
+    }, 500)
+  }, [id, currentUser])
+
+  const handleFollow = () => {
+    setIsFollowing(!isFollowing)
+    if (user) {
+      setUser({
+        ...user,
+        followersCount: isFollowing ? user.followersCount - 1 : user.followersCount + 1,
+      })
+    }
+  }
+
+  const handleLike = (postId: string) => {
+    setPosts(posts.map(post => 
+      post.id === postId 
+        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+        : post
+    ))
+    setReplies(replies.map(post => 
+      post.id === postId 
+        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+        : post
+    ))
+    setMediaPosts(mediaPosts.map(post => 
+      post.id === postId 
+        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+        : post
+    ))
+    setLikedPosts(likedPosts.map(post => 
+      post.id === postId 
+        ? { ...post, liked: !post.liked, likeCount: post.liked ? post.likeCount - 1 : post.likeCount + 1 }
+        : post
+    ))
+  }
+
+  const handleReshare = (postId: string) => {
+    setPosts(posts.map(post => 
+      post.id === postId 
+        ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+        : post
+    ))
+    setReplies(replies.map(post => 
+      post.id === postId 
+        ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+        : post
+    ))
+    setMediaPosts(mediaPosts.map(post => 
+      post.id === postId 
+        ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+        : post
+    ))
+    setLikedPosts(likedPosts.map(post => 
+      post.id === postId 
+        ? { ...post, reshared: !post.reshared, reshareCount: post.reshared ? post.reshareCount - 1 : post.reshareCount + 1 }
+        : post
+    ))
+  }
+
+  const handleBookmark = (postId: string) => {
+    setPosts(posts.map(post => 
+      post.id === postId 
+        ? { ...post, bookmarked: !post.bookmarked }
+        : post
+    ))
+    setReplies(replies.map(post => 
+      post.id === postId 
+        ? { ...post, bookmarked: !post.bookmarked }
+        : post
+    ))
+    setMediaPosts(mediaPosts.map(post => 
+      post.id === postId 
+        ? { ...post, bookmarked: !post.bookmarked }
+        : post
+    ))
+    setLikedPosts(likedPosts.map(post => 
+      post.id === postId 
+        ? { ...post, bookmarked: !post.bookmarked }
+        : post
+    ))
+  }
+
+  const handleSaveProfile = () => {
+    if (user) {
+      setUser({
+        ...user,
+        displayName: editName,
+        bio: editBio,
+        location: editLocation || undefined,
+        website: editWebsite || undefined,
+        avatar: editAvatar,
+        banner: editBanner,
+      })
+      // Update current user in auth context if it's the current user's profile
+      if (isOwnProfile && currentUser) {
+        // This would normally update the on-chain profile via useSui hook
+        // For now, we just update local state
+      }
+    }
+    setShowEditDialog(false)
+  }
+
+  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setEditAvatar(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setEditBanner(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Skeleton className="h-48 md:h-56 w-full" />
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+          <div className="relative -mt-20 mb-6">
+            <div className="flex items-end gap-4 mb-6">
+              <Skeleton className="w-24 h-24 sm:w-32 sm:h-32 rounded-full" />
+              <div className="pb-2">
+                <Skeleton className="h-8 w-48 mb-2" />
+                <Skeleton className="h-5 w-32" />
+              </div>
+            </div>
+            <div className="space-y-4 mb-8">
+              <Skeleton className="h-6 w-full max-w-xl" />
+              <Skeleton className="h-4 w-64" />
+              <div className="flex gap-6 pt-4">
+                <Skeleton className="h-5 w-20" />
+                <Skeleton className="h-5 w-20" />
+              </div>
+            </div>
+            <Skeleton className="h-10 w-full max-w-md rounded-lg" />
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!user) {
+    return (
+      <div className="p-12 text-center">
+        <p className="text-muted-foreground mb-4">User not found</p>
+        {!currentUser && (
+          <p className="text-sm text-muted-foreground mb-4">
+            Connect your wallet to view your profile
+          </p>
+        )}
+        <Link to="/">
+          <Button variant="outline">Go Home</Button>
+        </Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Banner Section */}
+      <div className="relative h-56 md:h-64 bg-gradient-to-br from-primary/20 via-primary/10 to-primary/5 overflow-hidden">
+        {user.banner ? (
+          <div className="relative w-full h-full">
+            <img
+              src={user.banner}
+              alt="Profile banner"
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none'
+              }}
+            />
+            <div className="absolute inset-0 bg-gradient-to-t from-background/95 via-background/60 to-transparent" />
+          </div>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-primary/10 to-primary/5" />
+        )}
+        
+        {isOwnProfile && currentUser && (
+          <div className="absolute top-4 right-4 z-10">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowEditDialog(true)}
+              className="bg-background/95 backdrop-blur-md hover:bg-background shadow-lg border-border/50"
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              Edit Profile
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Profile Content */}
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+        {/* Profile Header */}
+        <div className="relative -mt-24 mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-6">
+            {/* Avatar and Name */}
+            <div className="flex items-end gap-5">
+              <div className="relative group">
+                <div className="absolute -inset-1 bg-gradient-to-r from-primary via-primary/50 to-primary/20 rounded-full opacity-0 group-hover:opacity-100 blur transition-opacity duration-300" />
+                <Avatar className="relative w-28 h-28 sm:w-36 sm:h-36 border-4 border-background shadow-2xl ring-2 ring-border/50">
+                  <AvatarImage src={user.avatar} alt={user.displayName} />
+                  <AvatarFallback className="text-3xl sm:text-4xl font-bold bg-gradient-to-br from-primary/20 to-primary/10">
+                    {user.displayName[0]?.toUpperCase() || 'U'}
+                  </AvatarFallback>
+                </Avatar>
+                {user.isVerified && (
+                  <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-primary border-4 border-background flex items-center justify-center shadow-lg">
+                    <Verified className="w-4 h-4 text-primary-foreground" />
+                  </div>
+                )}
+              </div>
+              
+              <div className="pb-3 space-y-1">
+                <div className="flex items-center gap-2">
+                  <h1 className="text-3xl sm:text-4xl font-bold">{user.displayName}</h1>
+                  {user.isVerified && (
+                    <Verified className="w-5 h-5 text-primary" />
+                  )}
+                </div>
+                <p className="text-muted-foreground text-lg">@{user.username}</p>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3">
+              {!isOwnProfile && currentUser && (
+                <Button
+                  variant={isFollowing ? 'outline' : 'default'}
+                  onClick={handleFollow}
+                  className={cn(
+                    "min-w-[120px] font-semibold transition-all",
+                    isFollowing && "hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+                  )}
+                >
+                  {isFollowing ? (
+                    <>
+                      <Check className="w-4 h-4 mr-2" />
+                      Following
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4 mr-2" />
+                      Follow
+                    </>
+                  )}
+                </Button>
+              )}
+              {isOwnProfile && !currentUser && (
+                <Link to="/">
+                  <Button className="font-semibold">Connect Wallet</Button>
+                </Link>
+              )}
+              {currentUser && (
+                <Button variant="outline" size="icon" className="hover:bg-muted">
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Bio and Info */}
+        <div className="mb-8 space-y-5">
+          {user.bio && (
+            <p className="text-base leading-relaxed text-foreground/90 max-w-2xl">{user.bio}</p>
+          )}
+          
+          {/* Meta Information */}
+          <div className="flex flex-wrap items-center gap-5 text-sm">
+            {user.location && (
+              <div className="flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors">
+                <MapPin className="w-4 h-4" />
+                <span>{user.location}</span>
+              </div>
+            )}
+            {user.website && (
+              <a
+                href={user.website.startsWith('http') ? user.website : `https://${user.website}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-primary hover:underline transition-colors"
+              >
+                <LinkIcon className="w-4 h-4" />
+                <span className="truncate max-w-[200px]">{user.website.replace(/^https?:\/\//, '')}</span>
+              </a>
+            )}
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Calendar className="w-4 h-4" />
+              <span>Joined {format(new Date(user.joinedAt), 'MMMM yyyy')}</span>
+            </div>
+          </div>
+
+          {/* Stats */}
+          <div className="flex gap-8 pt-6 border-t border-border">
+            <Link
+              to={`/profile/${user.id}/following`}
+              className="group hover:opacity-80 transition-all"
+            >
+              <div className="flex flex-col">
+                <span className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">
+                  {user.followingCount.toLocaleString()}
+                </span>
+                <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                  Following
+                </span>
+              </div>
+            </Link>
+            <Link
+              to={`/profile/${user.id}/followers`}
+              className="group hover:opacity-80 transition-all"
+            >
+              <div className="flex flex-col">
+                <span className="text-xl font-bold text-foreground group-hover:text-primary transition-colors">
+                  {user.followersCount.toLocaleString()}
+                </span>
+                <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                  Followers
+                </span>
+              </div>
+            </Link>
+            <div className="group">
+              <div className="flex flex-col">
+                <span className="text-xl font-bold text-foreground">
+                  {posts.length.toLocaleString()}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  Posts
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full max-w-2xl grid-cols-4 bg-muted/50 p-1 rounded-lg">
+            <TabsTrigger 
+              value="posts" 
+              className="data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold"
+            >
+              Posts
+            </TabsTrigger>
+            <TabsTrigger 
+              value="replies"
+              className="data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold"
+            >
+              Replies
+            </TabsTrigger>
+            <TabsTrigger 
+              value="media"
+              className="data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold"
+            >
+              Media
+            </TabsTrigger>
+            <TabsTrigger 
+              value="likes"
+              className="data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold"
+            >
+              Likes
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="posts" className="mt-8">
+            {posts.length === 0 ? (
+              <div className="py-20 text-center border border-dashed border-border rounded-2xl bg-muted/30">
+                <MessageCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-semibold text-foreground mb-2">No posts yet</p>
+                {isOwnProfile && currentUser && (
+                  <p className="text-sm text-muted-foreground">Start sharing your thoughts with the community</p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-0 divide-y divide-border">
+                {posts.map(post => (
+                  <PostCard 
+                    key={post.id} 
+                    post={post}
+                    onLike={handleLike}
+                    onReshare={handleReshare}
+                    onBookmark={handleBookmark}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="replies" className="mt-8">
+            {replies.length === 0 ? (
+              <div className="py-20 text-center border border-dashed border-border rounded-2xl bg-muted/30">
+                <MessageCircle className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-semibold text-foreground mb-2">No replies yet</p>
+                <p className="text-sm text-muted-foreground">Replies will appear here</p>
+              </div>
+            ) : (
+              <div className="space-y-0 divide-y divide-border">
+                {replies.map(reply => (
+                  <PostCard 
+                    key={reply.id} 
+                    post={reply}
+                    onLike={handleLike}
+                    onReshare={handleReshare}
+                    onBookmark={handleBookmark}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="media" className="mt-8">
+            {mediaPosts.length === 0 ? (
+              <div className="py-20 text-center border border-dashed border-border rounded-2xl bg-muted/30">
+                <ImageIcon className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-semibold text-foreground mb-2">No media yet</p>
+                <p className="text-sm text-muted-foreground">Photos and videos will appear here</p>
+              </div>
+            ) : (
+              <div className="space-y-0 divide-y divide-border">
+                {mediaPosts.map(post => (
+                  <PostCard 
+                    key={post.id} 
+                    post={post}
+                    onLike={handleLike}
+                    onReshare={handleReshare}
+                    onBookmark={handleBookmark}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="likes" className="mt-8">
+            {likedPosts.length === 0 ? (
+              <div className="py-20 text-center border border-dashed border-border rounded-2xl bg-muted/30">
+                <Heart className="w-12 h-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-semibold text-foreground mb-2">No liked posts yet</p>
+                <p className="text-sm text-muted-foreground">Posts you like will appear here</p>
+              </div>
+            ) : (
+              <div className="space-y-0 divide-y divide-border">
+                {likedPosts.map(post => (
+                  <PostCard 
+                    key={post.id} 
+                    post={post}
+                    onLike={handleLike}
+                    onReshare={handleReshare}
+                    onBookmark={handleBookmark}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Edit Profile Dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold">Edit Profile</DialogTitle>
+            <DialogDescription className="text-base">
+              Update your profile information and make it stand out
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            {/* Banner Upload */}
+            <div>
+              <Label className="text-base font-semibold">Banner Image</Label>
+              <p className="text-sm text-muted-foreground mb-3">Upload a banner to personalize your profile</p>
+              <div className="mt-2">
+                <div className="h-40 w-full bg-gradient-to-br from-muted to-muted/50 rounded-xl overflow-hidden border-2 border-border">
+                  {editBanner ? (
+                    <div className="relative h-full group">
+                      <img
+                        src={editBanner}
+                        alt="Banner preview"
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity"
+                          onClick={() => setEditBanner('')}
+                        >
+                          <XIcon className="w-4 h-4 mr-2" />
+                          Remove
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="h-full flex items-center justify-center border-2 border-dashed border-border/50">
+                      <div className="text-center">
+                        <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground/50" />
+                        <p className="text-sm text-muted-foreground">No banner image</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleBannerChange}
+                  id="banner-upload"
+                  className="hidden"
+                />
+                <label htmlFor="banner-upload" className="mt-3 block">
+                  <Button variant="outline" size="sm" className="w-full cursor-pointer font-semibold" type="button">
+                    <Upload className="w-4 h-4 mr-2" />
+                    {editBanner ? 'Change Banner' : 'Upload Banner'}
+                  </Button>
+                </label>
+              </div>
+            </div>
+
+            {/* Avatar Upload */}
+            <div>
+              <Label className="text-base font-semibold">Profile Picture</Label>
+              <p className="text-sm text-muted-foreground mb-3">Your profile picture appears next to your posts</p>
+              <div className="mt-2 flex items-center gap-6">
+                <div className="relative">
+                  <Avatar className="w-24 h-24 border-4 border-background shadow-lg ring-2 ring-border">
+                    <AvatarImage src={editAvatar} />
+                    <AvatarFallback className="text-3xl font-bold bg-gradient-to-br from-primary/20 to-primary/10">
+                      {editName[0]?.toUpperCase() || 'U'}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+                <div className="flex flex-col gap-3">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarChange}
+                    id="avatar-upload"
+                    className="hidden"
+                  />
+                  <label htmlFor="avatar-upload">
+                    <Button variant="outline" size="sm" type="button" className="cursor-pointer font-semibold">
+                      <Upload className="w-4 h-4 mr-2" />
+                      {editAvatar ? 'Change Photo' : 'Upload Photo'}
+                    </Button>
+                  </label>
+                  {editAvatar && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setEditAvatar('')}
+                      className="text-destructive hover:text-destructive"
+                    >
+                      Remove
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Display Name */}
+            <div>
+              <Label htmlFor="displayName" className="text-base font-semibold">Display Name</Label>
+              <Input
+                id="displayName"
+                placeholder="Your display name"
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                maxLength={50}
+                className="mt-2 h-11"
+              />
+              <p className="text-xs text-muted-foreground mt-2 text-right">
+                {editName.length} / 50
+              </p>
+            </div>
+
+            {/* Bio */}
+            <div>
+              <Label htmlFor="bio" className="text-base font-semibold">Bio</Label>
+              <p className="text-sm text-muted-foreground mb-2">Tell the community about yourself</p>
+              <Textarea
+                id="bio"
+                placeholder="What's on your mind?"
+                value={editBio}
+                onChange={(e) => setEditBio(e.target.value)}
+                maxLength={160}
+                rows={4}
+                className="mt-2 resize-none"
+              />
+              <p className="text-xs text-muted-foreground mt-2 text-right">
+                {editBio.length} / 160
+              </p>
+            </div>
+
+            {/* Location */}
+            <div>
+              <Label htmlFor="location" className="text-base font-semibold">Location</Label>
+              <Input
+                id="location"
+                placeholder="City, Country"
+                value={editLocation}
+                onChange={(e) => setEditLocation(e.target.value)}
+                className="mt-2 h-11"
+              />
+            </div>
+
+            {/* Website */}
+            <div>
+              <Label htmlFor="website" className="text-base font-semibold">Website</Label>
+              <Input
+                id="website"
+                placeholder="https://example.com"
+                value={editWebsite}
+                onChange={(e) => setEditWebsite(e.target.value)}
+                type="url"
+                className="mt-2 h-11"
+              />
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowEditDialog(false)} className="font-semibold">
+              Cancel
+            </Button>
+            <Button onClick={handleSaveProfile} disabled={!editName.trim()} className="font-semibold min-w-[120px]">
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
